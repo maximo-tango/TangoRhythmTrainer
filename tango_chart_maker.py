@@ -130,8 +130,8 @@ def read_info(path):
         except Exception:
             tags = {}
     title = _clean(_first(tags, "title"))
-    artist = _clean(_first(tags, "artist"))
-    album_artist = _clean(_first(tags, "albumartist"))
+    artist = re.sub(r"^\d+_", "", _clean(_first(tags, "artist")))
+    album_artist = re.sub(r"^\d+_", "", _clean(_first(tags, "albumartist")))
     date = _first(tags, "date")
 
     singer = ""
@@ -542,12 +542,15 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
         print(f"  같은 음원이 이미 있어 건너뜀: {path.name} (= {seen[digest]})")
         return
     info = read_info(path)
-    sid = slugify(f"{info['orchestra']} {info['title']}" if info["orchestra"] else info["title"])
-    base = sid
-    k = 2
-    while sid in catalog and catalog[sid].get("md5") != digest:
-        sid = f"{base}-{k}"
-        k += 1
+    # 이미 목록에 있는 같은 음원은 그 id 를 그대로 쓴다 (id 를 손으로 정리해 둔 곡)
+    sid = next((s["id"] for s in catalog.values() if s.get("md5") == digest), None)
+    if sid is None:
+        sid = slugify(f"{info['orchestra']} {info['title']}" if info["orchestra"] else info["title"])
+        base = sid
+        k = 2
+        while sid in catalog and catalog[sid].get("md5") != digest:
+            sid = f"{base}-{k}"
+            k += 1
     seen[digest] = sid
     info.update({k2: v for k2, v in (meta.get(sid) or {}).items() if k2 in ("title", "orchestra", "singer", "year")})
     song_dir = out_dir / sid
