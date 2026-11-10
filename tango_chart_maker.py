@@ -12,12 +12,16 @@
     박자   피아노·반도네온 — 치고 빠지는 중음역 어택
     멜로디 바이올린·콘트라베이스(활)·보컬 비브라토 — 같은 음이 버티거나 커지는 소리
 
-  beat     박자: 탱고의 기본 걸음(tiempo)에 반박자(doble tiempo)와 싱커페이션(síncopa)을 더한다.
+  beat     박자 easy: 탱고의 기본 걸음(tiempo)에 반박자(doble tiempo)와 싱커페이션(síncopa)을 더한다.
              - 기본 걸음: 마르카토 박 두 개마다 한 걸음 (보통 1분에 60~70걸음)
              - 반박자: 걸음 사이 박에 강한 소리가 있으면 한 걸음 더
              - 싱커페이션: 박을 당겨 치는 강세(16분 앞당김, 3-3-2 리듬)가 있으면 그 자리에서 딛고,
                뒤따르는 박이 약하면(붙임줄) 그 박은 쉰다
              - 소리가 거의 없는 박은 쉰다(pausa)
+  beat_hard 박자 hard: easy 에 피아노·반도네온이 치는 8분음표·16분음표 리듬을 더한다.
+             - 걸음 하나(4분음표)를 16분 격자 네 칸으로 나눠 어택이 있는 칸을 딛는다
+             - 네 칸 중 세 칸 이상 치면 16분음표 연타(D'Arienzo 스타카토, 피아노 바리아시온)
+             - 그 밖에는 easy 처럼 8분(반박자)·싱커페이션
   musical  종합: 박자 걸음과 멜로디를 골고루. 길게 이어지는 멜로디는 '길게 눌렀다 떼는' 노트로
              긴 박자(2박·4박)를 표현한다. 길게 누르는 동안 다른 발은 딛지 않는다(두 발 동시 없음).
              박 = 마르카토 한 박(한 마디 4박). 2박 = 걸음 하나 길이, 4박 = 걸음 둘 길이
@@ -33,7 +37,8 @@
 결과 (songs 폴더를 그대로 GitHub 저장소에 올린다)
   songs/index.json               곡 목록 (게임이 읽는다)
   songs/<곡id>/audio.mp3         음원 (원본 그대로 복사)
-  songs/<곡id>/beat.json         박자 채보
+  songs/<곡id>/beat.json         박자 easy 채보
+  songs/<곡id>/beat_hard.json    박자 hard 채보 (8분·16분)
   songs/<곡id>/musical.json      종합 채보
   songs/meta.json                (선택) 곡 이름·악단 고치기. 키는 곡id
                                  예) {"nido-gaucho": {"orchestra": "Carlos Di Sarli", "singer": "Alberto Podestá"}}
@@ -41,10 +46,10 @@
 곡 이름·악단·가수·연도는 음원 태그에서 읽는다. 틀리면 songs/meta.json 에 적고 다시 실행한다
 (분석은 다시 하지 않으려면 --skip-existing).
 
-채보 형식 (beat.json / musical.json)
+채보 형식 (beat.json / beat_hard.json / musical.json)
   {"version": 1, "mode": "beat", "bpm": 64.2, "notes": [[시작ms, 발, 끝ms, 종류, 강박], ...]}
     발: 0 왼발 1 오른발 / 끝ms: 길게 누르는 노트의 끝(짧은 노트는 0)
-    종류: "p" 기본 걸음, "h" 반박자, "s" 싱커페이션, "m" 멜로디(길게) / 강박: 1이면 마디 첫 박
+    종류: "p" 기본 걸음(4분), "h" 반박자(8분), "q" 16분, "s" 싱커페이션, "m" 멜로디(길게) / 강박: 1이면 마디 첫 박
 
 주의: 녹음에서 소리의 세기·높이를 분석해 만드는 것이라 완벽하지 않다. 이상한 곳은 json 을 직접 고쳐도 된다.
 """
@@ -82,6 +87,9 @@ FINE_BPM_RANGE = (95.0, 190.0)  # 마르카토 박(4로 치는 박) 빠르기 �
 PAUSE_STRENGTH = 0.10           # 기본 걸음: 이보다 약하고 조용하면 쉰다
 HALF_MIN = 0.45                 # 반박자: 최소 세기
 HALF_REL = 0.85                 # 반박자: 앞뒤 걸음 세기 평균에 대한 비율
+HALF_LOCAL = 0.55               # 반박자: 근처 걸음 세기(중앙값)에 대한 최소 비율
+SIXTEENTH_MIN = 0.50            # 16분: 최소 세기
+SIXTEENTH_LOCAL = 0.70          # 16분: 근처 걸음 세기(중앙값)에 대한 최소 비율
 SYNC_MIN = 0.55                 # 싱커페이션: 최소 세기
 SYNC_REL = 1.10                 # 싱커페이션: 가까운 걸음보다 이만큼 세야 한다
 SYNC_TIE = 0.55                 # 싱커페이션 뒤 걸음이 (싱커 세기 × 이 값)보다 약하면 붙임줄로 보고 쉰다
@@ -236,6 +244,8 @@ def analyze(path):
     n = min(n, len(mid))
     onset, perc, rms, bass, rms_h, rms_p, mid = (x[:n] for x in (onset, perc, rms, bass, rms_h, rms_p, mid))
     hit = 0.3 * onset + 0.3 * perc + 0.4 * mid
+    # 박자 hard 의 8분·16분: 피아노·반도네온 어택만 (바이올린·베이스의 활 소리는 뺀 타악 성분)
+    pb = robust_norm(0.6 * mid + 0.4 * perc)
 
     fine, fine_bpm = track_fine_beats(onset, duration)
     # 기본 걸음 = 마르카토 박 둘 중 센 쪽 (저음 + 타격)
@@ -249,6 +259,7 @@ def analyze(path):
         "melody_bands": melody_bands(y_h),
         "duration": duration,
         "hit": hit,
+        "pb": pb,
         "rms": rms,
         "rms_h": rms_h,
         "rms_p": rms_p,
@@ -262,7 +273,8 @@ def analyze(path):
 
 # ── 박자 채보 ────────────────────────────────────────────────
 def beat_steps(a, extras=True):
-    """[(초, 종류, 강박)] — 종류 p 기본 걸음, h 반박자, s 싱커페이션"""
+    """박자 easy: [(초, 종류, 강박)] — 종류 p 기본 걸음, h 반박자, s 싱커페이션
+    걸음 사이에는 노트를 하나만 넣는다"""
     hit, rms, pulses = a["hit"], a["rms"], a["pulses"]
     steps = []
     skip_next_pulse = False
@@ -293,7 +305,11 @@ def beat_steps(a, extras=True):
         # 반박자 (doble tiempo)
         if s50 >= HALF_MIN and s50 >= HALF_REL * (sp + sn) / 2:
             steps.append((p + d * 0.5, "h", False))
-    # 너무 가까운 걸음 정리 (기본 걸음을 남긴다)
+    return thin_steps(steps)
+
+
+def thin_steps(steps):
+    """너무 가까운 걸음 정리 (기본 걸음을 남긴다)"""
     steps.sort()
     out = []
     for s in steps:
@@ -303,6 +319,65 @@ def beat_steps(a, extras=True):
             continue
         out.append(s)
     return out
+
+
+def beat_steps_hard(a):
+    """박자 hard: [(초, 종류, 강박)] — 종류 p 기본 걸음(4분), h 8분(반박자), q 16분, s 싱커페이션
+
+    걸음(4분음표) 하나를 16분 격자 네 칸(0, ¼, ½, ¾)으로 나눠, 피아노·반도네온 어택이
+    있는 칸을 딛는다.
+      - ½ 칸: 8분음표 (doble tiempo)
+      - ¼·¾ 칸: 네 칸 중 세 칸 이상 치면 16분음표 연타 (D'Arienzo 식 스타카토, 피아노 바리아시온)
+                혼자 튀어나오면 싱커페이션 (뒤 박이 약하면 붙임줄로 보고 그 박은 쉰다)
+    어택 세기는 주변 걸음들의 세기에 견줘서 본다 (큰 대목에서 모든 칸이 다 노트가 되지 않게)"""
+    hit, rms, pulses = a["hit"], a["rms"], a["pulses"]
+    pb = a.get("pb", hit)  # 피아노·반도네온 어택
+    sp_all = np.array([strength_at(pb, p) for p in pulses])
+    steps = []
+    skip_next_pulse = False
+    for i, p in enumerate(pulses):
+        d = (pulses[i + 1] - p) if i + 1 < len(pulses) else (p - pulses[i - 1])
+        accent = (i - a["bar_phase"]) % 2 == 0
+        sp = strength_at(hit, p)
+        quiet = mean_at(rms, p - d / 4, p + d / 4) < 0.12
+        if skip_next_pulse:
+            skip_next_pulse = False
+        elif not (sp < PAUSE_STRENGTH and quiet):
+            steps.append((p, "p", accent))
+        if i + 1 >= len(pulses):
+            continue
+        # 이 근처 걸음 세기 (앞뒤 4마디)
+        local = float(np.median(sp_all[max(0, i - 8):i + 9]))
+        s = {f: strength_at(pb, p + d * f, 0.025) for f in (0.0, 0.25, 0.5, 0.75)}
+        s[1.0] = strength_at(pb, pulses[i + 1])
+
+        def on(f, mn, rel):
+            return s[f] >= mn and s[f] >= rel * local
+
+        e8 = on(0.5, HALF_MIN, HALF_LOCAL) and s[0.5] >= HALF_REL * (s[0.0] + s[1.0]) / 2
+        # 16분 연타: 네 칸 중 세 칸 이상을 쳤을 때만 (센 박 뒤 울림 한 칸은 연타가 아니다)
+        slot = {f: on(f, SIXTEENTH_MIN, SIXTEENTH_LOCAL) for f in (0.25, 0.5, 0.75)}
+        slot[0.0] = s[0.0] >= SIXTEENTH_MIN and bool(steps) and steps[-1][0] == p
+        if sum(slot.values()) >= 3 and (slot[0.25] or slot[0.75]):
+            for f in (0.25, 0.5, 0.75):
+                if slot[f]:
+                    steps.append((p + d * f, "h" if f == 0.5 else "q", False))
+            continue
+        # 싱커페이션: 박을 앞당긴 강세 (0.75 = 다음 박 16분 앞, 0.25 = 3-3-2 의 둘째 강세 자리)
+        if s[0.75] >= SYNC_MIN and s[0.75] >= SYNC_REL * max(s[1.0], s[0.5]):
+            if e8:
+                steps.append((p + d * 0.5, "h", False))
+            steps.append((p + d * 0.75, "s", False))
+            if s[1.0] < SYNC_TIE * s[0.75]:
+                skip_next_pulse = True  # 붙임줄: 다음 박은 쉰다
+            continue
+        if s[0.25] >= SYNC_MIN and s[0.25] >= SYNC_REL * max(s[0.0], s[0.5]):
+            steps.append((p + d * 0.25, "s", False))
+            continue
+        # 8분 (doble tiempo)
+        if e8:
+            steps.append((p + d * 0.5, "h", False))
+    return thin_steps(steps)
 
 
 def to_notes(steps):
@@ -478,7 +553,7 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
     song_dir = out_dir / sid
     song_dir.mkdir(parents=True, exist_ok=True)
     audio_name = "audio" + path.suffix.lower()
-    if skip_existing and (song_dir / "beat.json").exists() and (song_dir / "musical.json").exists():
+    if skip_existing and all((song_dir / f"{m}.json").exists() for m in ("beat", "beat_hard", "musical")):
         prev = catalog.get(sid, {})
         prev.update(info)
         catalog[sid] = prev
@@ -487,27 +562,31 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
     t0 = time.time()
     a = analyze(path)
     beat = to_notes(beat_steps(a))
+    beat_hard = to_notes(beat_steps_hard(a))
     mus_steps, melody_s, holds = musical_steps(a)
     musical = to_notes(mus_steps)
     check_no_overlap(beat)
+    check_no_overlap(beat_hard)
     check_no_overlap(musical)
     shutil.copyfile(path, song_dir / audio_name)
-    for mode, notes in (("beat", beat), ("musical", musical)):
+    for mode, notes in (("beat", beat), ("beat_hard", beat_hard), ("musical", musical)):
         write_json(song_dir / f"{mode}.json", {"version": VERSION, "mode": mode, "bpm": round(a["bpm"], 1), "notes": notes})
     kinds = {k3: sum(1 for x in beat if x[3] == k3) for k3 in ("p", "h", "s")}
+    hk = {k3: sum(1 for x in beat_hard if x[3] == k3) for k3 in ("p", "h", "q", "s")}
     catalog[sid] = {
         "id": sid,
         **info,
         "duration_ms": int(a["duration"] * 1000),
         "bpm": round(a["bpm"], 1),
         "audio": f"{sid}/{audio_name}",
-        "modes": {"beat": f"{sid}/beat.json", "musical": f"{sid}/musical.json"},
-        "notes": {"beat": len(beat), "musical": len(musical)},
+        "modes": {"beat": f"{sid}/beat.json", "beat_hard": f"{sid}/beat_hard.json", "musical": f"{sid}/musical.json"},
+        "notes": {"beat": len(beat), "beat_hard": len(beat_hard), "musical": len(musical)},
         "md5": digest,
         "source": path.name,
     }
     print(
-        f"  {sid}: 걸음 {a['bpm']:.0f}/분 · 박자 {len(beat)}개(기본 {kinds['p']}·반박자 {kinds['h']}·싱커 {kinds['s']})"
+        f"  {sid}: 걸음 {a['bpm']:.0f}/분 · 박자 easy {len(beat)}개(기본 {kinds['p']}·반박자 {kinds['h']}·싱커 {kinds['s']})"
+        f" · hard {len(beat_hard)}개(8분 {hk['h']}·16분 {hk['q']}·싱커 {hk['s']})"
         f" · 종합 {len(musical)}개(길게 2박 {holds[2]}·4박 {holds[4]}, {melody_s:.0f}초)"
         f" · {time.time() - t0:.0f}초"
     )

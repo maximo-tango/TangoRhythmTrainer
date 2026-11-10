@@ -183,7 +183,8 @@ const HOME_RE=/^(https:\/\/(www\.)?maximo-tango\.com|http:\/\/localhost:3000)$/;
 const HOME=(()=>{try{const o=new URL(document.referrer).origin;return HOME_RE.test(o)?o:null}catch(e){return null}})();
 if(EMBED)document.documentElement.classList.add('embed');
 const MODES=[
- ['beat','박자','탱고의 기본 걸음에 반박자(doble tiempo)와 싱커페이션을 더했어요. 박을 몸에 익히기 좋아요. 처음이라면 여기서 시작하세요.'],
+ ['beat','박자 easy','탱고의 기본 걸음에 반박자(doble tiempo)와 싱커페이션을 더했어요. 박을 몸에 익히기 좋아요. 처음이라면 여기서 시작하세요.'],
+ ['beat_hard','박자 hard','피아노·반도네온이 치는 8분음표와 16분음표 연타까지 딛어요. 박자 easy 에 익숙해지면 도전하세요.'],
  ['musical','종합','박자 걸음에 멜로디를 더했어요. 길게 흐르는 멜로디는 2박·4박 동안 길게 눌렀다가 떼요.']];
 const modeLabel=m=>(MODES.find(x=>x[0]===m)||[m,m])[1];
 const store={get(k,d){try{const v=localStorage.getItem('trt.'+k);return v==null?d:JSON.parse(v)}catch(e){return d}},
