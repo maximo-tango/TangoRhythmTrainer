@@ -183,11 +183,8 @@ const HOME_RE=/^(https:\/\/(www\.)?maximo-tango\.com|http:\/\/localhost:3000)$/;
 const HOME=(()=>{try{const o=new URL(document.referrer).origin;return HOME_RE.test(o)?o:null}catch(e){return null}})();
 if(EMBED)document.documentElement.classList.add('embed');
 const MODES=[
- ['musical','종합','강세, 온셋, 음역 등 여러 음악적 특징을 종합한 기본 모드입니다. 처음이라면 여기서 시작하세요.'],
- ['tango','탱고 리듬','탱고 리듬에 맞는 이벤트를 골라 칩니다.'],
- ['beat','박자','박자(beat grid)를 중심으로 칩니다. 기본 박을 익히기 좋습니다.'],
- ['salient','강세','두드러지는 온셋과 강세를 중심으로 칩니다.'],
- ['instrument','악기','음역과 악기 역할별로 나눈 이벤트를 칩니다.']];
+ ['beat','박자','탱고의 기본 걸음에 반박자(doble tiempo)와 싱커페이션을 더했어요. 박을 몸에 익히기 좋아요. 처음이라면 여기서 시작하세요.'],
+ ['musical','종합','박자 걸음에 멜로디를 더했어요. 길게 흐르는 멜로디는 2박·4박 동안 길게 눌렀다가 떼요.']];
 const modeLabel=m=>(MODES.find(x=>x[0]===m)||[m,m])[1];
 const store={get(k,d){try{const v=localStorage.getItem('trt.'+k);return v==null?d:JSON.parse(v)}catch(e){return d}},
  set(k,v){try{localStorage.setItem('trt.'+k,JSON.stringify(v))}catch(e){}}};
@@ -234,7 +231,16 @@ async function dList(id){const q=encodeURIComponent("'"+id+"' in parents and tra
 async function hostSource(){if(!/^https?:/.test(location.protocol))return null;
  try{const r=await fetch('songs/index.json',{cache:'no-cache'});if(!r.ok)return null;const names=await r.json();
   let meta={};try{const m=await fetch('songs/meta.json',{cache:'no-cache'});if(m.ok)meta=await m.json()}catch(e){}
+  if(names&&Array.isArray(names.songs))return {v2:names.songs,get:(n,onp)=>fetchBuf('songs/'+n.split('/').map(encodeURIComponent).join('/'),onp)};
   return {names,meta,get:(n,onp)=>fetchBuf('songs/'+encodeURIComponent(n),onp)}}catch(e){return null}}
+/* 새 형식: 곡마다 음원 하나 + 모드별 채보(json) */
+function buildSongsV2(list){const key=s=>fold((s.orchestra||'')+' '+s.title);
+ return list.filter(s=>s&&s.id&&s.audio&&s.modes&&!s.hide).map(s=>({id:s.id,orchestra:s.orchestra||'',title:s.title||s.id,singer:s.singer||'',year:s.year||'',
+  audio:s.audio,files:Object.fromEntries(MODES.map(([m])=>[m,s.modes[m]]).filter(x=>x[1])),v2:true}))
+  .sort((a,b)=>(!a.orchestra-!b.orchestra)||key(a).localeCompare(key(b)))}
+/* 채보 json: notes = [시작ms, 발(0 왼발 1 오른발), 끝ms(길게 누르는 노트, 아니면 0), 종류, 강박] */
+function chartNotes(j){if(!j||!Array.isArray(j.notes))throw new Error('채보 형식이 맞지 않아요');
+ return j.notes.map(([t,l,e,k,a])=>{const hold=e>t;return {t,e:hold?e:t,l:l?1:0,acc:!!a,hold,kind:k,done:0,fin:hold?0:1}}).sort((a,b)=>a.t-b.t)}
 async function driveSource(){const root=await dList(DRIVE_FOLDER);let fl=root.filter(f=>/\.osz$/i.test(f.name));
  for(const d of root.filter(f=>f.mimeType==='application/vnd.google-apps.folder'&&/^songs?$/i.test(f.name)))fl=fl.concat((await dList(d.id)).filter(f=>/\.osz$/i.test(f.name)));
  const ids=Object.fromEntries(fl.map(f=>[f.name,f.id]));
@@ -258,7 +264,7 @@ function buildSongs(names,meta){const by=new Map(),mk={};
 const songLabel=s=>(s.orchestra?s.orchestra+' - ':'')+s.title;
 const songSub=s=>[s.singer,s.year].filter(Boolean).join(' · ');
 
-let source=null,songs=[],pick={song:store.get('song',null),mode:store.get('mode','musical')},loaded=null,loadTok=0;
+let source=null,songs=[],pick={song:store.get('song',null),mode:(m=>MODES.some(x=>x[0]===m)?m:'beat')(store.get('mode','beat'))},loaded=null,loadTok=0;
 const cache=new Map();
 const bestKey=(id,mode)=>'best.'+id+'|'+mode;
 
@@ -287,7 +293,14 @@ async function loadSelected(){const s=songs.find(x=>x.id===pick.song);const tok=
  let mode=pick.mode;if(!s.files[mode]){mode=MODES.map(x=>x[0]).find(m=>s.files[m]);pick.mode=mode;renderModes()}
  const file=s.files[mode];
  try{let r=cache.get(file);
-  if(!r){status('곡 받는 중…');progress(0);const buf=await source.get(file,p=>{if(tok===loadTok){progress(p);status('곡 받는 중… '+Math.round(p*100)+'%')}});
+  const onp=p=>{if(tok===loadTok){progress(p);status('곡 받는 중… '+Math.round(p*100)+'%')}};
+  if(s.v2){/* 음원은 모드끼리 같이 쓴다 */
+   let a=cache.get(s.audio);
+   if(!a){status('곡 받는 중…');progress(0);a={buf:await source.get(s.audio,onp)};if(tok!==loadTok)return;cache.set(s.audio,a);if(cache.size>4)cache.delete(cache.keys().next().value)}
+   const cn=chartNotes(JSON.parse(new TextDecoder().decode(await source.get(file))));
+   if(tok!==loadTok)return;progress(null);
+   setReady({v2:a,notes:cn,key:bestKey(s.id,mode),songId:s.id,mode,label:songLabel(s),sub:songSub(s),modeText:modeLabel(mode)});return}
+  if(!r){status('곡 받는 중…');progress(0);const buf=await source.get(file,onp);
    if(tok!==loadTok)return;r=await readOsz(buf);cache.set(file,r);if(cache.size>4)cache.delete(cache.keys().next().value)}
   if(tok!==loadTok)return;progress(null);
   setReady({zip:r.zip,chart:r.charts[0],key:bestKey(s.id,mode),songId:s.id,mode,label:songLabel(s),sub:songSub(s),modeText:modeLabel(mode)})
@@ -303,7 +316,7 @@ $('#file').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)
 
 (async()=>{renderModes();
  try{source=(await hostSource())||(API_KEY?await driveSource():null)}catch(err){status('⚠ '+(err.message||err),true)}
- songs=source?buildSongs(source.names,source.meta):[];
+ songs=!source?[]:source.v2?buildSongsV2(source.v2):buildSongs(source.names,source.meta);
  if(!songs.find(s=>s.id===pick.song))pick.song=null;
  renderSongs();renderModes();if(!songs.length)$('#settings').open=true;
  const sel=$('#songs .song[aria-pressed=true]');if(sel)sel.scrollIntoView({block:'center'});
@@ -325,10 +338,10 @@ async function start(r){if(!r)return;
  try{status('음악 준비 중…');
   if(ctx)try{ctx.close()}catch(e){}
   ctx=new (window.AudioContext||window.webkitAudioContext)();await ctx.resume();
+  if(!r.audio&&r.v2){if(!r.v2.audio)r.v2.audio=await new Promise((ok,no)=>ctx.decodeAudioData(r.v2.buf.slice(0),ok,no));r.audio=r.v2.audio}
   if(!r.audio){const k=Object.keys(r.zip.files).find(n=>n.toLowerCase()===r.chart.audio.toLowerCase());if(!k)throw new Error('음악 파일을 찾지 못했어요');
    const ab=await r.zip.files[k].async('arraybuffer');r.audio=await new Promise((ok,no)=>ctx.decodeAudioData(ab,ok,no))}
-  const c=r.chart;
-  notes=buildNotes(c);
+  notes=r.notes?r.notes.map(n=>({...n,done:0,fin:n.hold?0:1})):buildNotes(r.chart);
   st={sc:0,n:0,combo:0,max:0,j:'',jt:-1e9,cnt:{P:0,G:0,O:0,M:0},dts:[],early:0,late:0,sp:+sp.value,off:+of.value,end:Math.max(...notes.map(n=>n.e))+1500};
   flash=[0,0];fx=[];down=[false,false];holding=[null,null];playing=r;paused=false;$('#pause').classList.remove('on');
   src=ctx.createBufferSource();src.buffer=r.audio;src.connect(ctx.destination);
@@ -393,7 +406,7 @@ function loop(){const t=now(),{sw,x0,hy}=geom(),lw=sw/N,ppm=H*0.0008*st.sp,pn=pe
   if(!n.done){g.beginPath();g.roundRect(nx,y-12,nw,24,12);
    if(n.acc){g.fillStyle=C.gold;g.fill();g.globalAlpha=.25;g.beginPath();g.roundRect(nx-4,y-16,nw+8,32,16);g.fill();g.globalAlpha=1}
    else{g.fillStyle=C.note;g.globalAlpha=.85;g.fill();g.globalAlpha=1}}}
- /* 판정 위치: 발 모양 (노트가 발볼에 닿을 때 누른다) */
+ /* 판정 위치: 발 모양 (노트가 발끝 선에 닿을 때 누른다) */
  g.fillStyle='rgba(216,188,132,.14)';g.fillRect(x0,hy-1,sw,2);
  for(let i=0;i<N;i++)foot(x0+i*lw+lw/2,hy,i===0,down[i]||!!holding[i],Math.min(1.1,lw/140));
  /* 타격 효과 */
@@ -402,7 +415,7 @@ function loop(){const t=now(),{sw,x0,hy}=geom(),lw=sw/N,ppm=H*0.0008*st.sp,pn=pe
   g.beginPath();g.ellipse(cx,hy,(lw*0.3)+(lw*0.25)*k*(f.big?1.4:1),12+22*k,0,0,Math.PI*2);g.stroke();g.globalAlpha=1}
  /* 키 안내 */
  g.textAlign='center';g.textBaseline='middle';g.font='600 13px sans-serif';g.fillStyle='rgba(237,228,211,.35)';
- for(let i=0;i<N;i++)g.fillText((i?'오른발':'왼발')+(fine?' '+KEYS[i].toUpperCase():''),x0+i*lw+lw/2,hy+70);
+ for(let i=0;i<N;i++)g.fillText((i?'오른발':'왼발')+(fine?' '+KEYS[i].toUpperCase():''),x0+i*lw+lw/2,Math.min(H-16,hy+FOOT_LEN*Math.min(1.1,lw/140)+16));
  /* 진행 막대 */
  const prog=Math.max(0,Math.min(1,t/st.end));g.fillStyle='rgba(237,228,211,.1)';g.fillRect(0,0,W,3);g.fillStyle=C.gold;g.fillRect(0,0,W*prog,3);
  /* 상단 정보 */
@@ -417,8 +430,9 @@ function loop(){const t=now(),{sw,x0,hy}=geom(),lw=sw/N,ppm=H*0.0008*st.sp,pn=pe
   g.fillText(st.j,W/2,H*0.36+50);if(st.jd){g.font='600 13px sans-serif';g.fillStyle=C.muted;g.fillText(st.jd,W/2,H*0.36+72)}g.globalAlpha=1}
  if(t<0){g.font='800 56px sans-serif';g.fillStyle=C.gold;g.fillText(Math.ceil(-t/1000),W/2,H*0.5);g.font='600 14px sans-serif';g.fillStyle=C.muted;g.fillText('준비',W/2,H*0.5+30)}
  if(t>st.end){end();return}raf=requestAnimationFrame(loop)}
-/* 발자국: (x,y)가 발볼(노트가 닿는 곳). 왼발은 엄지가 오른쪽(안쪽) */
-function foot(x,y,left,on,s){const m=left?1:-1;g.save();g.translate(x,y);g.scale(s*m,s);
+/* 발자국: 발끝(엄지 끝)이 y(판정선)에 닿고 발은 그 아래. 왼발은 엄지가 오른쪽(안쪽) */
+const TOE_TOP=38.5,FOOT_LEN=TOE_TOP+56;
+function foot(x,y,left,on,s){const m=left?1:-1;g.save();g.translate(x,y+TOE_TOP*s);g.scale(s*m,s);
  g.fillStyle=on?C.gold:'rgba(237,228,211,.16)';g.strokeStyle=on?C.gold:'rgba(216,188,132,.55)';g.lineWidth=1.5/s;
  g.beginPath();
  g.moveTo(-15,-4);g.bezierCurveTo(-18,-22,16,-26,18,-8);g.bezierCurveTo(19,4,10,14,9,24);
