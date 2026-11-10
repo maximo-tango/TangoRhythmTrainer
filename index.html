@@ -336,15 +336,22 @@ async function start(r){if(!r)return;
   status(r.label+' · '+r.modeText);show('game');cancelAnimationFrame(raf);loop();
  }catch(err){status('⚠ '+(err.message||err),true);show('menu')}}
 
-/* 발 노트: 0 왼발, 1 오른발. 같은 시각 양쪽 노트(강박)는 앞 발과 반대 발 하나로 바꾸고 금색으로 표시.
-   같은 발이 이어지면 첫 노트부터 마지막 노트까지 길게 누르는 노트(t~e) 하나로 합친다 */
+/* 발 노트: 0 왼발, 1 오른발.
+   - 같은 시각 양쪽 노트(마디 강박)는 앞 발과 반대 발 하나로 바꾸고 금색으로 표시
+   - 같은 발이 한 번 반복되면(다음은 다른 발) 첫 노트부터 둘째 노트까지 길게 누르는 노트로 합친다
+   - 같은 칸이 세 번 이상 이어지면(악기·강세 모드는 칸이 음역이라 한쪽에 몰린다) 걷듯이 왼발·오른발을 번갈아 준다 */
+const HOLD_MAX=1200;
 function buildNotes(c){const lane=o=>c.cs===2?Math.min(1,Math.floor(o.x*2/512)):Math.min(3,Math.floor(o.x*4/512))>>1;
  const byT=new Map();for(const o of c.objs){if(!byT.has(o.t))byT.set(o.t,new Set());byT.get(o.t).add(lane(o))}
- const out=[];let prev=1;
- for(const t of [...byT.keys()].sort((a,b)=>a-b)){const ls=byT.get(t),both=ls.size>1,l=both?1-prev:[...ls][0];prev=l;
-  const last=out[out.length-1];
-  if(last&&last.l===l){last.e=t}else out.push({t,e:t,l,acc:both,done:0,fin:0})}
- out.forEach(n=>{n.hold=n.e>n.t;if(!n.hold)n.fin=1});return out}
+ const ev=[...byT.keys()].sort((a,b)=>a-b).map(t=>({t,ls:byT.get(t)}));
+ const out=[];
+ ev.forEach((e,i)=>{const last=out[out.length-1],both=e.ls.size>1;
+  let l=both?(last?1-last.l:0):[...e.ls][0];
+  if(last&&l===last.l){const nx=ev[i+1],nextSame=!!nx&&nx.ls.size===1&&nx.ls.has(l);
+   if(!last.hold&&!nextSame&&e.t-last.e<=HOLD_MAX){last.e=e.t;last.hold=true;return}
+   l=1-l}
+  out.push({t:e.t,e:e.t,l,acc:both,hold:false,done:0,fin:0})});
+ out.forEach(n=>{if(!n.hold)n.fin=1});return out}
 function hit(r,l,big){st.sc+=r[1];st.n++;st.cnt[r[2]]++;st.combo++;st.max=Math.max(st.max,st.combo);st.j=r[0];st.jt=performance.now();
  fx.push({l,t:performance.now(),c:JC[r[0]],big})}
 function missOne(why){st.n++;st.cnt.M++;st.combo=0;st.j='MISS';st.jd=why||'';st.jt=performance.now()}
