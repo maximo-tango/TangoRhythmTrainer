@@ -18,10 +18,12 @@
              - 싱커페이션: 박을 당겨 치는 강세(16분 앞당김, 3-3-2 리듬)가 있으면 그 자리에서 딛고,
                뒤따르는 박이 약하면(붙임줄) 그 박은 쉰다
              - 소리가 거의 없는 박은 쉰다(pausa)
-  beat_hard 박자 hard: easy 에 피아노·반도네온이 치는 8분음표·16분음표 리듬을 더한다.
-             - 걸음 하나(4분음표)를 16분 격자 네 칸으로 나눠 어택이 있는 칸을 딛는다
-             - 네 칸 중 세 칸 이상 치면 16분음표 연타(D'Arienzo 스타카토, 피아노 바리아시온)
-             - 그 밖에는 easy 처럼 8분(반박자)·싱커페이션
+  beat_hard 박자 hard: 피아노·반도네온이 치는 8분음표·16분음표 리듬까지 딛는다.
+             - 마디(16분 여덟 칸)마다 탱고 리듬형 중 어택에 가장 맞는 것을 고른다
+               (4분, 8분, 16분 연타, 싱코파, 3-3-2, 하바네라, 아라스트레…). 칸마다 따로 정하지 않아
+               말이 되는 리듬만 나온다
+             - 같은 선율이 되풀이되는 마디는 같은 리듬이 되게 서로 맞춘다
+  모든 모드: 노트는 계산한 격자 자리가 아니라 가까운 실제 피아노·반도네온 어택에 붙인다
   musical  종합: 박자 걸음과 멜로디를 골고루. 길게 이어지는 멜로디는 '길게 눌렀다 떼는' 노트로
              긴 박자(2박·4박)를 표현한다. 길게 누르는 동안 다른 발은 딛지 않는다(두 발 동시 없음).
              박 = 마르카토 한 박(한 마디 4박). 2박 = 걸음 하나 길이, 4박 = 걸음 둘 길이
@@ -35,7 +37,8 @@
   python tango_chart_maker.py "Nido Gaucho.mp3"  # 한 곡만
 
 결과 (songs 폴더를 그대로 GitHub 저장소에 올린다)
-  songs/index.json               곡 목록 (게임이 읽는다)
+  songs/index.json               곡 목록 (게임이 읽는다). 곡마다 모드별 난이도 level 도 적는다
+                                 (1분당 판정 수 ÷ 100, 0.7~1.5. 공홈 게임·순위와 같은 식)
   songs/<곡id>/audio.mp3         음원 (원본 그대로 복사)
   songs/<곡id>/beat.json         박자 easy 채보
   songs/<곡id>/beat_hard.json    박자 hard 채보 (8분·16분)
@@ -87,13 +90,12 @@ FINE_BPM_RANGE = (95.0, 190.0)  # 마르카토 박(4로 치는 박) 빠르기 �
 PAUSE_STRENGTH = 0.10           # 기본 걸음: 이보다 약하고 조용하면 쉰다
 HALF_MIN = 0.45                 # 반박자: 최소 세기
 HALF_REL = 0.85                 # 반박자: 앞뒤 걸음 세기 평균에 대한 비율
-HALF_LOCAL = 0.55               # 반박자: 근처 걸음 세기(중앙값)에 대한 최소 비율
-SIXTEENTH_MIN = 0.50            # 16분: 최소 세기
-SIXTEENTH_LOCAL = 0.70          # 16분: 근처 걸음 세기(중앙값)에 대한 최소 비율
 SYNC_MIN = 0.55                 # 싱커페이션: 최소 세기
 SYNC_REL = 1.10                 # 싱커페이션: 가까운 걸음보다 이만큼 세야 한다
 SYNC_TIE = 0.55                 # 싱커페이션 뒤 걸음이 (싱커 세기 × 이 값)보다 약하면 붙임줄로 보고 쉰다
 MIN_GAP_MS = 150                # 두 걸음 사이 최소 간격
+SNAP_MS = 35                    # 노트를 이 안의 실제 피아노·반도네온 어택에 붙인다
+SNAP_MIN = 0.30                 # 이보다 약한 어택에는 붙이지 않는다
 MELODY_MIN_S = 0.45             # 멜로디 노트 최소 길이(초)
 MELODY_MAX_SHARE = 0.40         # 종합: 곡 전체에서 멜로디(길게) 노트가 차지하는 최대 비율
 MELODY_PER_PHRASE = 2           # 종합: 한 프레이즈(4마디)에 멜로디 노트 최대 개수
@@ -215,6 +217,22 @@ def track_fine_beats(onset_env, duration):
     return np.array(sorted(head) + list(beats) + tail), bpm
 
 
+def snap_steps(steps, env):
+    """노트를 ±SNAP_MS 안의 실제 어택 봉우리에 붙인다 (계산한 격자 자리 → 실제 소리)"""
+    fps = SR / HOP
+    w = int(SNAP_MS / 1000 * fps)
+    out = []
+    for st in steps:
+        c = int(round(st[0] * fps))
+        a, b = max(0, c - w), min(len(env), c + w + 1)
+        if b - a >= 3:
+            k = a + int(np.argmax(env[a:b]))
+            if env[k] >= SNAP_MIN and a < k < b - 1:
+                st = (k / fps,) + tuple(st[1:])
+        out.append(st)
+    return out
+
+
 def pick_phase(times, score, period):
     """times 를 period 개씩 묶었을 때 score 평균이 가장 큰 자리"""
     vals = [float(np.mean([score(t) for t in times[p::period]])) for p in range(period)]
@@ -305,7 +323,7 @@ def beat_steps(a, extras=True):
         # 반박자 (doble tiempo)
         if s50 >= HALF_MIN and s50 >= HALF_REL * (sp + sn) / 2:
             steps.append((p + d * 0.5, "h", False))
-    return thin_steps(steps)
+    return thin_steps(snap_steps(steps, a["pb"]))
 
 
 def thin_steps(steps):
@@ -321,63 +339,135 @@ def thin_steps(steps):
     return out
 
 
-def beat_steps_hard(a):
-    """박자 hard: [(초, 종류, 강박)] — 종류 p 기본 걸음(4분), h 8분(반박자), q 16분, s 싱커페이션
+# ── 박자 hard: 탱고 리듬형 ────────────────────────────────────
+# 한 마디(2/4, 걸음 둘) = 16분 여덟 칸. 반 마디(걸음 하나) 네 칸마다 아래 리듬형 중 하나를 고른다.
+#   x... 4분(기본 걸음)        x.x. 8분 둘(doble tiempo)
+#   xxx. 16분 둘 + 8분          x.xx 8분 + 16분 둘          xxxx 16분 넷(스타카토 연타)
+#   x..x 점8분 + 16분(싱코파: 다음 박을 16분 앞당김. 뒤 반 마디가 비면 붙임줄,
+#        두 반 마디로 3-3-2, 하바네라(x..xx.x.), 마디 끝이면 아라스트레(다음 강박으로 끌기))
+#   ..x. 박은 쉬고 8분만        .... 쉼(붙임줄·pausa)
+# 반 마디에 16분이 혼자 있는 꼴(xx.., .x.. 등)은 리듬형에 없어서 나오지 않는다.
+HALF_PATTERNS = {  # 리듬형: 덜 흔한 꼴일수록 깎는 점수
+    "x...": 0.0, "x.x.": 0.0, "xxx.": -0.15, "x.xx": -0.15, "xxxx": -0.25,
+    "x..x": -0.10, "..x.": -0.30, "....": 0.0,
+}
+SLOT_COST = (0.20, 0.85, 0.70, 0.85)  # 칸(박, 16분, 8분, 16분)을 딛는 데 필요한 세기 (근처 걸음 세기 대비)
+REPEAT_WEIGHT = 1.5              # 반복 맞춤: 같은 선율이 되풀이되는 마디들의 판단을 이만큼 더한다
+REPEAT_SIM = 0.92                # 반복 맞춤: 화성(크로마)이 이만큼 닮은 마디를 '되풀이'로 본다
+REPEAT_MAX = 6                   # 반복 맞춤: 마디마다 참고하는 되풀이 마디 수
+GHOST_MIN = 0.20                 # 8분·16분·싱커 노트 자리의 어택이 이보다 약하면(소리가 없으면) 뺀다
+REPEAT_RHYTHM_SIM = 0.75        # 반복 맞춤: 어택 짜임도 이만큼 닮아야 같은 대목 (화성만 같고 편곡이 다른 곳은 빼고)
 
-    걸음(4분음표) 하나를 16분 격자 네 칸(0, ¼, ½, ¾)으로 나눠, 피아노·반도네온 어택이
-    있는 칸을 딛는다.
-      - ½ 칸: 8분음표 (doble tiempo)
-      - ¼·¾ 칸: 네 칸 중 세 칸 이상 치면 16분음표 연타 (D'Arienzo 식 스타카토, 피아노 바리아시온)
-                혼자 튀어나오면 싱커페이션 (뒤 박이 약하면 붙임줄로 보고 그 박은 쉰다)
-    어택 세기는 주변 걸음들의 세기에 견줘서 본다 (큰 대목에서 모든 칸이 다 노트가 되지 않게)"""
-    hit, rms, pulses = a["hit"], a["rms"], a["pulses"]
-    pb = a.get("pb", hit)  # 피아노·반도네온 어택
+
+def _bar_patterns():
+    pats = []
+    for h1, c1 in HALF_PATTERNS.items():
+        for h2, c2 in HALF_PATTERNS.items():
+            pats.append((h1 + h2, c1 + c2))
+    return pats
+
+
+BAR_PATTERNS = _bar_patterns()
+_PAT_MASK = np.array([[ch == "x" for ch in p] for p, _ in BAR_PATTERNS], dtype=float)
+_PAT_PRIOR = np.array([c for _, c in BAR_PATTERNS])
+
+
+def hard_bars(a):
+    """마디마다 칸 여덟 개의 시각·세기(근처 걸음 세기 대비)와 화성"""
+    pb, rms, pulses, bp = a["pb"], a["rms"], a["pulses"], a["bar_phase"]
+    n = len(pulses)
     sp_all = np.array([strength_at(pb, p) for p in pulses])
+    d_med = float(np.median(np.diff(pulses)))
+    chroma = a["melody_bands"]["high"][0]
+
+    def pulse_t(j):
+        if j < 0:
+            return pulses[0] + j * d_med
+        if j >= n:
+            return pulses[-1] + (j - n + 1) * d_med
+        return pulses[j]
+
+    bars = []
+    for j0 in range(bp - 2, n, 2):
+        if j0 + 1 < 0:
+            continue
+        times, ev, valid, accent = [], [], [], []
+        for h in range(2):
+            j = j0 + h
+            t0, t1 = pulse_t(j), pulse_t(j + 1)
+            ok = 0 <= j < n - 1 or (j == n - 1)
+            local = max(0.3, float(np.median(sp_all[max(0, j - 8):j + 9]))) if 0 <= j < n else 1.0
+            quiet = 0 <= j < n and strength_at(a["hit"], t0) < PAUSE_STRENGTH and mean_at(rms, t0 - (t1 - t0) / 4, t0 + (t1 - t0) / 4) < 0.12
+            for q in range(4):
+                t = t0 + (t1 - t0) * q / 4
+                times.append(t)
+                inside = 0 <= j < n and (q == 0 or j < n - 1) and t < a["duration"] - 0.2
+                valid.append(inside)
+                e = strength_at(pb, t, 0.025) / local if inside else 0.0
+                if q == 0 and quiet:
+                    e = 0.0
+                ev.append(e)
+                accent.append(q == 0 and h == 0)
+        # 화성: 걸음마다 크로마 평균 (되풀이 찾기)
+        vs = []
+        for h in range(2):
+            f0, f1 = _frames(pulse_t(j0 + h), pulse_t(j0 + h + 1))
+            vs.append(chroma[:, f0:f1].mean(axis=1) if f1 <= chroma.shape[1] and f1 > f0 else np.zeros(12))
+        v = np.concatenate(vs)
+        bars.append({"times": times, "ev": np.array(ev), "valid": np.array(valid), "accent": accent,
+                     "chroma": v / (np.linalg.norm(v) + 1e-9)})
+    return bars
+
+
+def beat_steps_hard(a):
+    """박자 hard: [(초, 종류, 강박)] — 종류 p 기본 걸음(4분), h 8분, q 16분, s 싱커페이션
+
+    1) 마디마다 탱고 리듬형(HALF_PATTERNS 두 개) 중 피아노·반도네온 어택에 가장 맞는 것을 고른다.
+       점수 = 딛는 칸마다 (어택 세기 − 칸 비용) + 리듬형 점수. 칸마다 따로 정하지 않으니
+       말이 되는 리듬만 나온다.
+    2) 같은 선율·화성이 되풀이되는 마디들은 서로의 점수를 더해서 고른다.
+       그래서 되풀이되는 대목은 같은 리듬이 되고(외워서 딛기 좋다), 녹음 잡음에 덜 흔들린다.
+    3) 노트를 실제 어택에 붙인다."""
+    bars = hard_bars(a)
+    if not bars:
+        return []
+    cost = np.array(SLOT_COST * 2)
+    E = np.array([b["ev"] for b in bars])                      # 마디 × 8
+    V = np.array([b["valid"] for b in bars])
+    own = (E - cost) @ _PAT_MASK.T + _PAT_PRIOR                 # 마디 × 리듬형
+    own -= 100.0 * ((~V).astype(float) @ _PAT_MASK.T)           # 곡 밖 칸은 딛지 않는다
+    # 되풀이 맞춤
+    C = np.array([b["chroma"] for b in bars])
+    S = C @ C.T
+    total = own.copy()
+    for m in range(len(bars)):
+        sim = S[m].copy()
+        sim[max(0, m - 1):m + 2] = -1  # 바로 옆 마디는 빼고
+        cand = [k for k in np.argsort(-sim)[:REPEAT_MAX] if sim[k] >= REPEAT_SIM]
+        # 리듬 짜임도 비슷해야 같은 대목 (화성만 같고 편곡이 다른 곳은 빼고)
+        cand = [k for k in cand if float(E[m] @ E[k]) / (np.linalg.norm(E[m]) * np.linalg.norm(E[k]) + 1e-9) >= REPEAT_RHYTHM_SIM]
+        if cand:
+            total[m] += REPEAT_WEIGHT * own[cand].mean(axis=0)
+    choice = np.argmax(total, axis=1)
+
     steps = []
-    skip_next_pulse = False
-    for i, p in enumerate(pulses):
-        d = (pulses[i + 1] - p) if i + 1 < len(pulses) else (p - pulses[i - 1])
-        accent = (i - a["bar_phase"]) % 2 == 0
-        sp = strength_at(hit, p)
-        quiet = mean_at(rms, p - d / 4, p + d / 4) < 0.12
-        if skip_next_pulse:
-            skip_next_pulse = False
-        elif not (sp < PAUSE_STRENGTH and quiet):
-            steps.append((p, "p", accent))
-        if i + 1 >= len(pulses):
-            continue
-        # 이 근처 걸음 세기 (앞뒤 4마디)
-        local = float(np.median(sp_all[max(0, i - 8):i + 9]))
-        s = {f: strength_at(pb, p + d * f, 0.025) for f in (0.0, 0.25, 0.5, 0.75)}
-        s[1.0] = strength_at(pb, pulses[i + 1])
-
-        def on(f, mn, rel):
-            return s[f] >= mn and s[f] >= rel * local
-
-        e8 = on(0.5, HALF_MIN, HALF_LOCAL) and s[0.5] >= HALF_REL * (s[0.0] + s[1.0]) / 2
-        # 16분 연타: 네 칸 중 세 칸 이상을 쳤을 때만 (센 박 뒤 울림 한 칸은 연타가 아니다)
-        slot = {f: on(f, SIXTEENTH_MIN, SIXTEENTH_LOCAL) for f in (0.25, 0.5, 0.75)}
-        slot[0.0] = s[0.0] >= SIXTEENTH_MIN and bool(steps) and steps[-1][0] == p
-        if sum(slot.values()) >= 3 and (slot[0.25] or slot[0.75]):
-            for f in (0.25, 0.5, 0.75):
-                if slot[f]:
-                    steps.append((p + d * f, "h" if f == 0.5 else "q", False))
-            continue
-        # 싱커페이션: 박을 앞당긴 강세 (0.75 = 다음 박 16분 앞, 0.25 = 3-3-2 의 둘째 강세 자리)
-        if s[0.75] >= SYNC_MIN and s[0.75] >= SYNC_REL * max(s[1.0], s[0.5]):
-            if e8:
-                steps.append((p + d * 0.5, "h", False))
-            steps.append((p + d * 0.75, "s", False))
-            if s[1.0] < SYNC_TIE * s[0.75]:
-                skip_next_pulse = True  # 붙임줄: 다음 박은 쉰다
-            continue
-        if s[0.25] >= SYNC_MIN and s[0.25] >= SYNC_REL * max(s[0.0], s[0.5]):
-            steps.append((p + d * 0.25, "s", False))
-            continue
-        # 8분 (doble tiempo)
-        if e8:
-            steps.append((p + d * 0.5, "h", False))
-    return thin_steps(steps)
+    for b, ci in zip(bars, choice):
+        pat = BAR_PATTERNS[ci][0]
+        for k, ch in enumerate(pat):
+            if ch != "x" or not b["valid"][k]:
+                continue
+            q, half = k % 4, pat[(k // 4) * 4:(k // 4) * 4 + 4]
+            # 되풀이 맞춤으로 골랐어도 그 자리에 소리가 없으면 딛지 않는다
+            if q and strength_at(a["pb"], b["times"][k], 0.025) < GHOST_MIN:
+                continue
+            if q == 0:
+                kind = "p"
+            elif q == 2:
+                kind = "h"
+            else:
+                kind = "s" if half == "x..x" else "q"
+            steps.append((b["times"][k], kind, b["accent"][k]))
+    return thin_steps(snap_steps(steps, a["pb"]))
 
 
 def to_notes(steps):
@@ -524,6 +614,30 @@ def check_no_overlap(notes):
 
 
 # ── 출력 ────────────────────────────────────────────────────
+MODE_NAMES = ("beat", "beat_hard", "musical")
+
+
+def chart_level(notes):
+    """난이도 배수 = 1분당 판정 수 ÷ 100 (0.7~1.5, 소수 둘째 자리).
+    공홈 게임(rhythm-engine.ts chartLevel)·순위 DB(_rhythm_level)와 같은 식:
+    판정 수 = 노트 + 긴 노트 뗌, 길이 = 마지막 노트 끝 + 1.5초"""
+    if not notes:
+        return 0.7
+    n = len(notes) + sum(1 for x in notes if x[2] > x[0])
+    dur = max(max(x[0], x[2]) for x in notes) + 1500
+    v = min(1.5, max(0.7, n * 600 / dur))
+    return int(v * 100 + 0.5 + 1e-9) / 100  # 자바스크립트 Math.round 와 같게 (반올림)
+
+
+def read_levels(song_dir):
+    out = {}
+    for m in MODE_NAMES:
+        f = song_dir / f"{m}.json"
+        if f.exists():
+            out[m] = chart_level(json.loads(f.read_text(encoding="utf-8"))["notes"])
+    return out
+
+
 def write_json(path, data):
     path.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
 
@@ -554,11 +668,11 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
     seen[digest] = sid
     info.update({k2: v for k2, v in (meta.get(sid) or {}).items() if k2 in ("title", "orchestra", "singer", "year")})
     song_dir = out_dir / sid
-    song_dir.mkdir(parents=True, exist_ok=True)
     audio_name = "audio" + path.suffix.lower()
     if skip_existing and all((song_dir / f"{m}.json").exists() for m in ("beat", "beat_hard", "musical")):
         prev = catalog.get(sid, {})
         prev.update(info)
+        prev["level"] = read_levels(song_dir)
         catalog[sid] = prev
         print(f"  이미 있음: {sid}")
         return
@@ -571,6 +685,7 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
     check_no_overlap(beat)
     check_no_overlap(beat_hard)
     check_no_overlap(musical)
+    song_dir.mkdir(parents=True, exist_ok=True)  # 분석이 된 곡만 폴더를 만든다
     shutil.copyfile(path, song_dir / audio_name)
     for mode, notes in (("beat", beat), ("beat_hard", beat_hard), ("musical", musical)):
         write_json(song_dir / f"{mode}.json", {"version": VERSION, "mode": mode, "bpm": round(a["bpm"], 1), "notes": notes})
@@ -584,6 +699,7 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
         "audio": f"{sid}/{audio_name}",
         "modes": {"beat": f"{sid}/beat.json", "beat_hard": f"{sid}/beat_hard.json", "musical": f"{sid}/musical.json"},
         "notes": {"beat": len(beat), "beat_hard": len(beat_hard), "musical": len(musical)},
+        "level": {"beat": chart_level(beat), "beat_hard": chart_level(beat_hard), "musical": chart_level(musical)},
         "md5": digest,
         "source": path.name,
     }
