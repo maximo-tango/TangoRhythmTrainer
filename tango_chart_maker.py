@@ -24,7 +24,7 @@
                말이 되는 리듬만 나온다
              - 같은 선율이 되풀이되는 마디는 같은 리듬이 되게 서로 맞춘다
   모든 모드: 노트는 계산한 격자 자리가 아니라 가까운 실제 피아노·반도네온 어택에 붙인다
-  musical  종합: 박자 걸음과 멜로디를 골고루. 길게 이어지는 멜로디는 '길게 눌렀다 떼는' 노트로
+  musical  종합: 박자 hard 리듬(8분·16분)과 멜로디를 골고루 (MUSICAL_BASE 로 easy 걸음도 가능). 길게 이어지는 멜로디는 '길게 눌렀다 떼는' 노트로
              긴 박자(2박·4박)를 표현한다. 길게 누르는 동안 다른 발은 딛지 않는다(두 발 동시 없음).
              박 = 마르카토 한 박(한 마디 4박). 2박 = 걸음 하나 길이, 4박 = 걸음 둘 길이
 
@@ -99,6 +99,7 @@ SNAP_MIN = 0.30                 # 이보다 약한 어택에는 붙이지 않는
 MELODY_MIN_S = 0.45             # 멜로디 노트 최소 길이(초)
 MELODY_MAX_SHARE = 0.40         # 종합: 곡 전체에서 멜로디(길게) 노트가 차지하는 최대 비율
 MELODY_PER_PHRASE = 2           # 종합: 한 프레이즈(4마디)에 멜로디 노트 최대 개수
+MUSICAL_BASE = "hard"            # 종합: 멜로디를 얹을 박자 채보 ("hard" 8분·16분 리듬 / "easy" 기본 걸음)
 
 
 # ── 곡 정보 ──────────────────────────────────────────────────
@@ -554,7 +555,7 @@ def melody_runs(a):
 
 
 def musical_steps(a):
-    """종합: 박자 걸음 + 길게 누르는 멜로디 노트(2박·4박)"""
+    """종합: 박자 hard 리듬 + 길게 누르는 멜로디 노트(2박·4박)"""
     pulses, fine = a["pulses"], a["fine"]
     beat = float(np.median(np.diff(fine)))  # 마르카토 한 박
 
@@ -585,7 +586,8 @@ def musical_steps(a):
     chosen.sort()
 
     out = []
-    for st in beat_steps(a, extras=True):
+    base = beat_steps_hard(a) if MUSICAL_BASE == "hard" else beat_steps(a, extras=True)
+    for st in base:
         # 길게 누르는 동안(시작~끝)은 다른 발을 딛지 않는다. 끝나는 박에서 다음 걸음
         near_end = [ce for cs, ce, _ in chosen if abs(st[0] - ce) < 0.08]
         if near_end:  # 길게 누른 노트가 끝나는 박: 끝나는 순간에 맞춰 다음 발
