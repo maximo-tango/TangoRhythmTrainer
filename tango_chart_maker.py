@@ -45,6 +45,8 @@
   songs/<곡id>/musical.json      종합 채보
   songs/meta.json                (선택) 곡 이름·악단 고치기. 키는 곡id
                                  예) {"nido-gaucho": {"orchestra": "Carlos Di Sarli", "singer": "Alberto Podestá"}}
+                                 바리아시온 구간: {"곡id": {"variacion": [["2:24", "2:47"]]}}
+                                   → 박자 hard·종합에서 그 구간을 16분 연타로 채운다 (빠른 음 줄기는 분석으로 잘 안 잡힌다)
 
 곡 이름·악단·가수·연도는 음원 태그에서 읽는다. 틀리면 songs/meta.json 에 적고 다시 실행한다
 (분석은 다시 하지 않으려면 --skip-existing).
@@ -451,13 +453,24 @@ def beat_steps_hard(a):
             total[m] += REPEAT_WEIGHT * own[cand].mean(axis=0)
     choice = np.argmax(total, axis=1)
 
+    var = a.get("variacion") or []
+
+    def in_var(t):
+        return any(v0 <= t < v1 for v0, v1 in var)
+
     steps = []
     for b, ci in zip(bars, choice):
         pat = BAR_PATTERNS[ci][0]
         for k, ch in enumerate(pat):
-            if ch != "x" or not b["valid"][k]:
+            if not b["valid"][k]:
                 continue
             q, half = k % 4, pat[(k // 4) * 4:(k // 4) * 4 + 4]
+            if in_var(b["times"][k]):
+                # 바리아시온: 16분 칸을 모두 딛는다 (0.11초 안팎의 실제 음 줄기를 절반 빠르기로)
+                steps.append((b["times"][k], "p" if q == 0 else "h" if q == 2 else "q", b["accent"][k]))
+                continue
+            if ch != "x":
+                continue
             # 되풀이 맞춤으로 골랐어도 그 자리에 소리가 없으면 딛지 않는다
             if q and strength_at(a["pb"], b["times"][k], 0.025) < GHOST_MIN:
                 continue
@@ -571,7 +584,10 @@ def musical_steps(a):
     budget = a["duration"] * MELODY_MAX_SHARE
     per_phrase = {}
     chosen = []
+    var = a.get("variacion") or []
     for score, s, e, k in cands:
+        if any(s < v1 and e > v0 for v0, v1 in var):
+            continue  # 바리아시온은 16분 연타로 딛는다
         if budget <= 0:
             break
         ph = int((s - fine[0]) // phrase_len)
@@ -652,6 +668,25 @@ def file_md5(path):
     return h.hexdigest()
 
 
+def parse_ranges(items):
+    """meta.json 의 구간 [["2:24", "2:47"], [30, 41.5]] → [(초, 초)]"""
+    def sec(x):
+        if isinstance(x, (int, float)):
+            return float(x)
+        m, _, s2 = str(x).strip().rpartition(":")
+        return (int(m) * 60 if m else 0) + float(s2)
+    out = []
+    for it in items or []:
+        try:
+            a0, a1 = sec(it[0]), sec(it[1])
+        except (TypeError, ValueError, IndexError):
+            print(f"  ! 구간을 읽지 못함: {it}")
+            continue
+        if a1 > a0:
+            out.append((a0, a1))
+    return out
+
+
 def process(path, out_dir, meta, catalog, seen, skip_existing):
     digest = file_md5(path)
     if digest in seen:
@@ -680,6 +715,7 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
         return
     t0 = time.time()
     a = analyze(path)
+    a["variacion"] = parse_ranges((meta.get(sid) or {}).get("variacion"))
     beat = to_notes(beat_steps(a))
     beat_hard = to_notes(beat_steps_hard(a))
     mus_steps, melody_s, holds = musical_steps(a)

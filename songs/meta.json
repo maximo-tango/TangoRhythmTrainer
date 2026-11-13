@@ -36,7 +36,7 @@
   "osvaldo-pugliese-maleza": { "title": "Maleza", "orchestra": "Osvaldo Pugliese", "singer": "", "year": "" },
   "paciencia": { "orchestra": "Juan D'Arienzo", "title": "Paciencia" },
   "pedro-laurenz-jorge-linares-naranjo-en-flor": { "orchestra": "Pedro Laurenz", "title": "Naranjo en Flor", "singer": "Jorge Linares" },
-  "pedro-laurenz-no-me-extrana": { "title": "No Me Extraña", "orchestra": "Pedro Laurenz", "singer": "", "year": "" },
+  "pedro-laurenz-no-me-extrana": { "title": "No Me Extraña", "orchestra": "Pedro Laurenz", "singer": "", "year": "", "variacion": [["2:24", "2:47"]] },
   "raza-criolla-el-taita": { "orchestra": "", "title": "Raza Criolla (El Taita)" },
   "ricardo-tanturi-cuatro-compases": { "orchestra": "Ricardo Tanturi", "title": "Cuatro Compases", "singer": "Alberto Castillo", "year": "1942" },
   "rodolfo-biagi-teofilo-ibanez-viejo-porton-1938": { "orchestra": "Rodolfo Biagi", "title": "Viejo Portón", "singer": "Teófilo Ibáñez", "year": "1938" }

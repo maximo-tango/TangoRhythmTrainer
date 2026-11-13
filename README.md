@@ -39,6 +39,12 @@
 { "juan-d-arienzo-derecho-viejo": { "orchestra": "Osvaldo Pugliese" } }
 ```
 
+바리아시온(Variación)처럼 아주 빠르게 몰아치는 구간은 소리 분석으로 잘 잡히지 않습니다. 곡 id 에 `variacion` 으로 구간(분:초)을 적으면, 박자 hard·종합에서 그 구간을 16분 연타(왼발·오른발 번갈아)로 채웁니다.
+
+```json
+{ "pedro-laurenz-no-me-extrana": { "variacion": [["2:24", "2:47"]] } }
+```
+
 분석은 다시 하지 않고 곡 정보만 고치려면 `python tango_chart_maker.py --skip-existing`.
 한 곡만 만들려면 `python tango_chart_maker.py "곡.mp3"`.
 
