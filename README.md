@@ -39,6 +39,8 @@
 { "juan-d-arienzo-derecho-viejo": { "orchestra": "Osvaldo Pugliese" } }
 ```
 
+새로 넣은 곡은 처음 만들 때 `index.json` 에 추가 날짜(`added`)가 적히고, 게임 곡 목록에 2주 동안 **New** 로 나옵니다. 날짜를 고치려면 `meta.json` 에 `"added": "2026-11-13"` 처럼 적습니다.
+
 바리아시온(Variación)처럼 아주 빠르게 몰아치는 구간은 소리 분석으로 잘 잡히지 않습니다. 곡 id 에 `variacion` 으로 구간(분:초)을 적으면, 박자 hard·종합에서 그 구간을 16분 연타(왼발·오른발 번갈아)로 채웁니다.
 
 ```json

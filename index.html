@@ -40,6 +40,7 @@ h2 small{font-weight:400;color:var(--muted);font-size:12px}
 .song .t{font-weight:600;font-size:15px;line-height:1.35}
 .song .t span{color:var(--muted);font-weight:400}
 .song .a{font-size:12.5px;color:var(--muted);margin-top:2px}
+.song .new{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;background:var(--primary);color:var(--on-primary);font-size:10.5px;font-weight:700;letter-spacing:.02em;vertical-align:2px}
 .song .best{flex:none;font-size:12px;color:var(--gold-ink);font-variant-numeric:tabular-nums}
 .song[aria-pressed=true]{background:var(--sel);box-shadow:inset 3px 0 0 var(--primary)}
 .empty{padding:18px 14px;color:var(--muted);font-size:14px;text-align:center;margin:0}
@@ -237,7 +238,7 @@ async function hostSource(){if(!/^https?:/.test(location.protocol))return null;
 /* 새 형식: 곡마다 음원 하나 + 모드별 채보(json) */
 function buildSongsV2(list){const key=s=>fold((s.orchestra||'')+' '+s.title);
  return list.filter(s=>s&&s.id&&s.audio&&s.modes&&!s.hide).map(s=>({id:s.id,orchestra:s.orchestra||'',title:s.title||s.id,singer:s.singer||'',year:s.year||'',
-  audio:s.audio,files:Object.fromEntries(MODES.map(([m])=>[m,s.modes[m]]).filter(x=>x[1])),v2:true}))
+  audio:s.audio,added:s.added||'',files:Object.fromEntries(MODES.map(([m])=>[m,s.modes[m]]).filter(x=>x[1])),v2:true}))
   .sort((a,b)=>(!a.orchestra-!b.orchestra)||key(a).localeCompare(key(b)))}
 /* 채보 json: notes = [시작ms, 발(0 왼발 1 오른발), 끝ms(길게 누르는 노트, 아니면 0), 종류, 강박] */
 function chartNotes(j){if(!j||!Array.isArray(j.notes))throw new Error('채보 형식이 맞지 않아요');
@@ -269,6 +270,8 @@ let source=null,songs=[],pick={song:store.get('song',null),mode:(m=>MODES.some(x
 const cache=new Map();
 const bestKey=(id,mode)=>'best.'+id+'|'+mode;
 
+/* 새로 올린 곡: 추가된 지 2주 동안 New (생성기가 index.json 에 added 를 적는다) */
+const NEW_DAYS=14,isNew=s=>{const t=s.added&&Date.parse(s.added+'T00:00:00');return !!t&&Date.now()-t<NEW_DAYS*864e5};
 function renderSongs(){const box=$('#songs'),q=fold($('#q').value);
  const list=songs.filter(s=>!q||fold(songLabel(s)+' '+songSub(s)).includes(q));
  $('#songCount').textContent=songs.length?songs.length+'곡':'';
@@ -276,7 +279,7 @@ function renderSongs(){const box=$('#songs'),q=fold($('#q').value);
  if(!list.length){box.innerHTML='<p class="empty">찾는 곡이 없어요.</p>';return}
  box.innerHTML=list.map(s=>{const b=store.get(bestKey(s.id,pick.mode),null),sub=songSub(s);
   return '<button class="song" role="listitem" data-id="'+esc(s.id)+'" aria-pressed="'+(s.id===pick.song)+'"><div class="tx"><div class="t">'+
-   (s.orchestra?esc(s.orchestra)+' <span>-</span> ':'')+esc(s.title)+'</div>'+(sub?'<div class="a">'+esc(sub)+'</div>':'')+'</div>'+
+   (s.orchestra?esc(s.orchestra)+' <span>-</span> ':'')+esc(s.title)+(isNew(s)?'<b class="new">New</b>':'')+'</div>'+(sub?'<div class="a">'+esc(sub)+'</div>':'')+'</div>'+
    (b!=null?'<span class="best">최고 '+b.toFixed(1)+'%</span>':'')+'</button>'}).join('')}
 $('#songs').onclick=e=>{const b=e.target.closest('.song');if(!b)return;pick.song=b.dataset.id;store.set('song',pick.song);
  $('#songs').querySelectorAll('.song').forEach(x=>x.setAttribute('aria-pressed',x===b));renderModes();loadSelected()};

@@ -45,6 +45,8 @@
   songs/<곡id>/musical.json      종합 채보
   songs/meta.json                (선택) 곡 이름·악단 고치기. 키는 곡id
                                  예) {"nido-gaucho": {"orchestra": "Carlos Di Sarli", "singer": "Alberto Podestá"}}
+                                 추가 날짜(New 표시): 새 곡은 처음 만들 때 "added": "YYYY-MM-DD" 가 저절로 적힌다.
+                                   meta.json 에 "added" 를 적어 고칠 수 있다
                                  바리아시온 구간: {"곡id": {"variacion": [["2:24", "2:47"]]}}
                                    → 박자 hard·종합에서 그 구간을 16분 연타로 채운다 (빠른 음 줄기는 분석으로 잘 안 잡힌다)
 
@@ -66,6 +68,7 @@ import re
 import shutil
 import sys
 import time
+from datetime import date
 import unicodedata
 from pathlib import Path
 
@@ -633,6 +636,7 @@ def check_no_overlap(notes):
 
 # ── 출력 ────────────────────────────────────────────────────
 MODE_NAMES = ("beat", "beat_hard", "musical")
+META_KEYS = ("title", "orchestra", "singer", "year", "added")  # meta.json 으로 고칠 수 있는 곡 정보
 
 
 def chart_level(notes):
@@ -703,7 +707,7 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
             sid = f"{base}-{k}"
             k += 1
     seen[digest] = sid
-    info.update({k2: v for k2, v in (meta.get(sid) or {}).items() if k2 in ("title", "orchestra", "singer", "year")})
+    info.update({k2: v for k2, v in (meta.get(sid) or {}).items() if k2 in META_KEYS})
     song_dir = out_dir / sid
     audio_name = "audio" + path.suffix.lower()
     if skip_existing and all((song_dir / f"{m}.json").exists() for m in ("beat", "beat_hard", "musical")):
@@ -729,6 +733,8 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
         write_json(song_dir / f"{mode}.json", {"version": VERSION, "mode": mode, "bpm": round(a["bpm"], 1), "notes": notes})
     kinds = {k3: sum(1 for x in beat if x[3] == k3) for k3 in ("p", "h", "s")}
     hk = {k3: sum(1 for x in beat_hard if x[3] == k3) for k3 in ("p", "h", "q", "s")}
+    # 처음 목록에 들어온 곡은 추가 날짜를 적는다 (게임이 2주 동안 New 로 보여 준다)
+    added = (catalog.get(sid) or {}).get("added") or (None if sid in catalog else date.today().isoformat())
     catalog[sid] = {
         "id": sid,
         **info,
@@ -740,6 +746,7 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
         "level": {"beat": chart_level(beat), "beat_hard": chart_level(beat_hard), "musical": chart_level(musical)},
         "md5": digest,
         "source": path.name,
+        **({"added": added} if added else {}),
     }
     print(
         f"  {sid}: 걸음 {a['bpm']:.0f}/분 · 박자 easy {len(beat)}개(기본 {kinds['p']}·반박자 {kinds['h']}·싱커 {kinds['s']})"
@@ -803,7 +810,7 @@ def main():
 
     songs = sorted(catalog.values(), key=lambda s: ((s.get("orchestra") or "~").lower(), s.get("title", "").lower()))
     for s in songs:
-        s.update({k: v for k, v in (meta.get(s["id"]) or {}).items() if k in ("title", "orchestra", "singer", "year")})
+        s.update({k: v for k, v in (meta.get(s["id"]) or {}).items() if k in META_KEYS})
     write_json(index_path, {"version": VERSION, "songs": songs})
     print(f"\n완료: {len(songs)}곡 → {index_path}")
     print("songs 폴더를 GitHub 저장소에 올리면 게임에 나옵니다.")
