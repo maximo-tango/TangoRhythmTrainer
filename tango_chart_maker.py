@@ -99,6 +99,7 @@ SYNC_MIN = 0.55                 # 싱커페이션: 최소 세기
 SYNC_REL = 1.10                 # 싱커페이션: 가까운 걸음보다 이만큼 세야 한다
 SYNC_TIE = 0.55                 # 싱커페이션 뒤 걸음이 (싱커 세기 × 이 값)보다 약하면 붙임줄로 보고 쉰다
 MIN_GAP_MS = 150                # 두 걸음 사이 최소 간격
+SOUND_END_RMS = 0.02  # 곡 끝 판단: 세기(95백분위 대비)가 이보다 작아지면 음악이 끝난 것
 SNAP_MS = 35                    # 노트를 이 안의 실제 피아노·반도네온 어택에 붙인다
 SNAP_MIN = 0.30                 # 이보다 약한 어택에는 붙이지 않는다
 MELODY_MIN_S = 0.45             # 멜로디 노트 최소 길이(초)
@@ -270,6 +271,9 @@ def analyze(path):
     hit = 0.3 * onset + 0.3 * perc + 0.4 * mid
     # 박자 hard 의 8분·16분: 피아노·반도네온 어택만 (바이올린·베이스의 활 소리는 뺀 타악 성분)
     pb = robust_norm(0.6 * mid + 0.4 * perc)
+    # 음악이 실제로 끝나는 때: 끝의 무음·잡음 꼬리에는 노트를 두지 않는다
+    loud = np.where(rms > SOUND_END_RMS)[0]
+    sound_end = (loud[-1] + 1) * HOP / SR if len(loud) else duration
 
     fine, fine_bpm = track_fine_beats(onset, duration)
     # 기본 걸음 = 마르카토 박 둘 중 센 쪽 (저음 + 타격)
@@ -282,6 +286,7 @@ def analyze(path):
         "y_h": y_h,
         "melody_bands": melody_bands(y_h),
         "duration": duration,
+        "sound_end": min(duration, sound_end),
         "hit": hit,
         "pb": pb,
         "rms": rms,
@@ -485,6 +490,18 @@ def beat_steps_hard(a):
                 kind = "s" if half == "x..x" else "q"
             steps.append((b["times"][k], kind, b["accent"][k]))
     return thin_steps(snap_steps(steps, a["pb"]))
+
+
+def cut_tail(steps, end):
+    """음악이 끝난 뒤의 걸음은 버리고, 길게 누르기는 끝 시각까지만"""
+    out = []
+    for st in steps:
+        if st[0] >= end:
+            continue
+        if len(st) > 3 and st[3] and st[3] > end:
+            st = (*st[:3], end, *st[4:])
+        out.append(st)
+    return out
 
 
 def to_notes(steps):
@@ -720,10 +737,11 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
     t0 = time.time()
     a = analyze(path)
     a["variacion"] = parse_ranges((meta.get(sid) or {}).get("variacion"))
-    beat = to_notes(beat_steps(a))
-    beat_hard = to_notes(beat_steps_hard(a))
+    end = a["sound_end"]
+    beat = to_notes(cut_tail(beat_steps(a), end))
+    beat_hard = to_notes(cut_tail(beat_steps_hard(a), end))
     mus_steps, melody_s, holds = musical_steps(a)
-    musical = to_notes(mus_steps)
+    musical = to_notes(cut_tail(mus_steps, end))
     check_no_overlap(beat)
     check_no_overlap(beat_hard)
     check_no_overlap(musical)
