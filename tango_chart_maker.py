@@ -23,7 +23,10 @@
                (4분, 8분, 16분 연타, 싱코파, 3-3-2, 하바네라, 아라스트레…). 칸마다 따로 정하지 않아
                말이 되는 리듬만 나온다
              - 같은 선율이 되풀이되는 마디는 같은 리듬이 되게 서로 맞춘다
-  모든 모드: 노트는 계산한 격자 자리가 아니라 가까운 실제 피아노·반도네온 어택에 붙인다
+             - 난이도(1분당 판정 수 ÷ 100)를 1.40~1.50 에 맞춘다: 실제 어택이 있는 8분·16분 자리를
+               더 딛거나 덜 딛는다 (종합도 같다). 소리 없는 자리는 채우지 않으니 못 미치는 곡도 있다
+  모든 모드: 마르카토 박 격자를 박마다 가까운 실제 어택으로 다시 맞추고(루바토에 밀리지 않게),
+             노트도 계산한 격자 자리가 아니라 가까운 실제 피아노·반도네온 어택에 붙인다
   musical  종합: 박자 hard 리듬(8분·16분)과 멜로디를 골고루 (MUSICAL_BASE 로 easy 걸음도 가능). 길게 이어지는 멜로디는 '길게 눌렀다 떼는' 노트로
              긴 박자(2박·4박)를 표현한다. 길게 누르는 동안 다른 발은 딛지 않는다(두 발 동시 없음).
              박 = 마르카토 한 박(한 마디 4박). 2박 = 걸음 하나 길이, 4박 = 걸음 둘 길이
@@ -95,13 +98,17 @@ FINE_BPM_RANGE = (95.0, 190.0)  # 마르카토 박(4로 치는 박) 빠르기 �
 PAUSE_STRENGTH = 0.10           # 기본 걸음: 이보다 약하고 조용하면 쉰다
 HALF_MIN = 0.45                 # 반박자: 최소 세기
 HALF_REL = 0.85                 # 반박자: 앞뒤 걸음 세기 평균에 대한 비율
-SYNC_MIN = 0.55                 # 싱커페이션: 최소 세기
-SYNC_REL = 1.10                 # 싱커페이션: 가까운 걸음보다 이만큼 세야 한다
+SYNC_MIN = 0.45                 # 싱커페이션: 최소 세기
+SYNC_REL = 1.00                 # 싱커페이션: 가까운 걸음보다 이만큼 세야 한다
 SYNC_TIE = 0.55                 # 싱커페이션 뒤 걸음이 (싱커 세기 × 이 값)보다 약하면 붙임줄로 보고 쉰다
 MIN_GAP_MS = 150                # 두 걸음 사이 최소 간격
 SOUND_END_RMS = 0.02  # 곡 끝 판단: 세기(95백분위 대비)가 이보다 작아지면 음악이 끝난 것
-SNAP_MS = 35                    # 노트를 이 안의 실제 피아노·반도네온 어택에 붙인다
-SNAP_MIN = 0.30                 # 이보다 약한 어택에는 붙이지 않는다
+SNAP_MS = 60                    # 노트를 이 안의 실제 피아노·반도네온 어택에 붙인다 (16분 간격의 30%를 넘지 않게 줄인다)
+SNAP_MIN = 0.20                 # 이보다 약한 어택에는 붙이지 않는다 (GHOST_MIN 과 같게: 남긴 노트는 모두 실제 어택에 붙는다)
+SNAP_NEAR = 0.5                 # 붙일 어택 고르기: 멀수록 세기를 깎는다 (창 끝에서 이만큼)
+BEAT_SNAP_MS = 70               # 마르카토 박 격자를 이 안의 실제 어택으로 다시 맞춘다 (루바토·박 추적의 늦음 바로잡기)
+LEVEL_TARGET = (1.40, 1.50)     # 박자 hard·종합 난이도 목표. 실제 어택이 있는 8분·16분 자리를 더 딛거나 덜 딛어 맞춘다
+LEVEL_AIM = 1.45
 MELODY_MIN_S = 0.45             # 멜로디 노트 최소 길이(초)
 MELODY_MAX_SHARE = 0.40         # 종합: 곡 전체에서 멜로디(길게) 노트가 차지하는 최대 비율
 MELODY_PER_PHRASE = 2           # 종합: 한 프레이즈(4마디)에 멜로디 노트 최대 개수
@@ -224,19 +231,51 @@ def track_fine_beats(onset_env, duration):
     return np.array(sorted(head) + list(beats) + tail), bpm
 
 
-def snap_steps(steps, env):
-    """노트를 ±SNAP_MS 안의 실제 어택 봉우리에 붙인다 (계산한 격자 자리 → 실제 소리)"""
+def nearest_attack(env, t, win_s, min_strength=SNAP_MIN):
+    """t 앞뒤 win_s 안의 어택 봉우리(앞뒤보다 큰 곳) 중 가깝고 센 것의 시각. 없으면 None.
+    창 안에서 가장 센 곳을 무조건 고르면 옆 16분의 센 어택으로 끌려가므로, 멀수록 깎는다."""
     fps = SR / HOP
-    w = int(SNAP_MS / 1000 * fps)
+    w = max(2, int(win_s * fps))
+    c = int(round(t * fps))
+    a, b = max(1, c - w), min(len(env) - 1, c + w + 1)
+    best, best_k = 0.0, None
+    for k in range(a, b):
+        e = env[k]
+        if e < min_strength or e < env[k - 1] or e < env[k + 1]:
+            continue
+        score = e * (1 - SNAP_NEAR * abs(k - c) / w)
+        if score > best:
+            best, best_k = score, k
+    return None if best_k is None else best_k / fps
+
+
+def snap_steps(steps, env, sixteenth=None):
+    """노트를 ±SNAP_MS 안의 실제 어택 봉우리에 붙인다 (계산한 격자 자리 → 실제 소리)"""
+    win = SNAP_MS / 1000
+    if sixteenth:
+        win = min(win, 0.3 * sixteenth)
     out = []
     for st in steps:
-        c = int(round(st[0] * fps))
-        a, b = max(0, c - w), min(len(env), c + w + 1)
-        if b - a >= 3:
-            k = a + int(np.argmax(env[a:b]))
-            if env[k] >= SNAP_MIN and a < k < b - 1:
-                st = (k / fps,) + tuple(st[1:])
+        k = nearest_attack(env, st[0], win)
+        if k is not None:
+            st = (k,) + tuple(st[1:])
         out.append(st)
+    return out
+
+
+def refine_beats(beats, env):
+    """박 추적은 박 간격을 고르게 펴서 실제 어택보다 늦거나 이르다. 박마다 가까운 실제 어택으로 옮긴다.
+    옮긴 뒤 앞뒤 박 간격이 원래의 60%보다 좁아지면 그 박은 그대로 둔다."""
+    out = np.array(beats, dtype=float)
+    step = float(np.median(np.diff(beats))) if len(beats) > 1 else 0.5
+    win = min(BEAT_SNAP_MS / 1000, 0.15 * step)
+    for i, t in enumerate(beats):
+        k = nearest_attack(env, t, win)
+        if k is None:
+            continue
+        if i and k - out[i - 1] < 0.6 * step:
+            continue
+        out[i] = k
     return out
 
 
@@ -276,6 +315,7 @@ def analyze(path):
     sound_end = (loud[-1] + 1) * HOP / SR if len(loud) else duration
 
     fine, fine_bpm = track_fine_beats(onset, duration)
+    fine = refine_beats(fine, pb)
     # 기본 걸음 = 마르카토 박 둘 중 센 쪽 (저음 + 타격)
     phase = pick_phase(fine, lambda t: strength_at(hit, t) + strength_at(bass, t, 0.05), 2)
     pulses = fine[phase::2]
@@ -356,12 +396,12 @@ def thin_steps(steps):
 #   xxx. 16분 둘 + 8분          x.xx 8분 + 16분 둘          xxxx 16분 넷(스타카토 연타)
 #   x..x 점8분 + 16분(싱코파: 다음 박을 16분 앞당김. 뒤 반 마디가 비면 붙임줄,
 #        두 반 마디로 3-3-2, 하바네라(x..xx.x.), 마디 끝이면 아라스트레(다음 강박으로 끌기))
-#   ..x. 박은 쉬고 8분만        .... 쉼(붙임줄·pausa)
+#   ..x. 박은 쉬고 8분만(엇박)   ...x 박은 쉬고 다음 박 16분 앞에서만(당김음)   .... 쉼(붙임줄·pausa)
 # 반 마디에 16분이 혼자 있는 꼴(xx.., .x.. 등)은 리듬형에 없어서 나오지 않는다.
 HALF_PATTERNS = {  # 리듬형: 덜 흔한 꼴일수록 깎는 점수
     "x...": 0.0, "x.x.": 0.0, "xxx.": -0.15, "x.xx": -0.15, "xxxx": -0.25,
-    "x..x": -0.10, "..x.": -0.30, "....": 0.0,
-}
+    "x..x": 0.25, "..x.": 0.0, "...x": -0.05, "....": 0.0,
+}  # 싱코파(x..x)·엇박(..x.)·당김음(...x)은 더 자주 고르게 높게 쳐 준다
 SLOT_COST = (0.20, 0.85, 0.70, 0.85)  # 칸(박, 16분, 8분, 16분)을 딛는 데 필요한 세기 (근처 걸음 세기 대비)
 REPEAT_WEIGHT = 1.5              # 반복 맞춤: 같은 선율이 되풀이되는 마디들의 판단을 이만큼 더한다
 REPEAT_SIM = 0.92                # 반복 맞춤: 화성(크로마)이 이만큼 닮은 마디를 '되풀이'로 본다
@@ -430,7 +470,7 @@ def hard_bars(a):
     return bars
 
 
-def beat_steps_hard(a):
+def beat_steps_hard(a, bias=0.0):
     """박자 hard: [(초, 종류, 강박)] — 종류 p 기본 걸음(4분), h 8분, q 16분, s 싱커페이션
 
     1) 마디마다 탱고 리듬형(HALF_PATTERNS 두 개) 중 피아노·반도네온 어택에 가장 맞는 것을 고른다.
@@ -438,11 +478,14 @@ def beat_steps_hard(a):
        말이 되는 리듬만 나온다.
     2) 같은 선율·화성이 되풀이되는 마디들은 서로의 점수를 더해서 고른다.
        그래서 되풀이되는 대목은 같은 리듬이 되고(외워서 딛기 좋다), 녹음 잡음에 덜 흔들린다.
-    3) 노트를 실제 어택에 붙인다."""
-    bars = hard_bars(a)
+    3) 노트를 실제 어택에 붙인다.
+    bias: 8분·16분 칸 비용을 이만큼 낮춘다(+ 더 딛고, − 덜 딛는다). 난이도 맞추기에 쓴다."""
+    if "_bars" not in a:
+        a["_bars"] = hard_bars(a)
+    bars = a["_bars"]
     if not bars:
         return []
-    cost = np.array(SLOT_COST * 2)
+    cost = np.array(SLOT_COST * 2) - bias * np.array([0, 1, 1, 1] * 2)
     E = np.array([b["ev"] for b in bars])                      # 마디 × 8
     V = np.array([b["valid"] for b in bars])
     own = (E - cost) @ _PAT_MASK.T + _PAT_PRIOR                 # 마디 × 리듬형
@@ -487,9 +530,10 @@ def beat_steps_hard(a):
             elif q == 2:
                 kind = "h"
             else:
-                kind = "s" if half == "x..x" else "q"
+                kind = "s" if q == 3 and half in ("x..x", "...x") else "q"
             steps.append((b["times"][k], kind, b["accent"][k]))
-    return thin_steps(snap_steps(steps, a["pb"]))
+    sixteenth = float(np.median(np.diff(a["pulses"]))) / 4
+    return thin_steps(snap_steps(steps, a["pb"], sixteenth))
 
 
 def cut_tail(steps, end):
@@ -587,7 +631,7 @@ def melody_runs(a):
     return cands
 
 
-def musical_steps(a):
+def musical_steps(a, bias=0.0):
     """종합: 박자 hard 리듬 + 길게 누르는 멜로디 노트(2박·4박)"""
     pulses, fine = a["pulses"], a["fine"]
     beat = float(np.median(np.diff(fine)))  # 마르카토 한 박
@@ -619,10 +663,16 @@ def musical_steps(a):
         chosen.append((s, e, k))
         per_phrase[ph] = per_phrase.get(ph, 0) + 1
         budget -= e - s
-    chosen.sort()
+    # 박 격자에서 고른 시작·끝을 가까운 실제 어택에 붙인다 (끝 = 다음 발을 딛는 순간)
+    snapped = []
+    for cs, ce, k in chosen:
+        cs2 = nearest_attack(a["hit"], cs, SNAP_MS / 1000) or cs
+        ce2 = nearest_attack(a["hit"], ce, SNAP_MS / 1000) or ce
+        snapped.append((cs2, ce2, k) if ce2 - cs2 > beat else (cs, ce, k))
+    chosen = sorted(snapped)
 
     out = []
-    base = beat_steps_hard(a) if MUSICAL_BASE == "hard" else beat_steps(a, extras=True)
+    base = beat_steps_hard(a, bias) if MUSICAL_BASE == "hard" else beat_steps(a, extras=True)
     for st in base:
         # 길게 누르는 동안(시작~끝)은 다른 발을 딛지 않는다. 끝나는 박에서 다음 걸음
         near_end = [ce for cs, ce, _ in chosen if abs(st[0] - ce) < 0.08]
@@ -666,6 +716,44 @@ def chart_level(notes):
     dur = max(max(x[0], x[2]) for x in notes) + 1500
     v = min(1.5, max(0.7, n * 600 / dur))
     return int(v * 100 + 0.5 + 1e-9) / 100  # 자바스크립트 Math.round 와 같게 (반올림)
+
+
+def raw_level(notes):
+    """chart_level 의 자르기·반올림 전 값 (난이도 맞추기 탐색용)"""
+    if not notes:
+        return 0.0
+    n = len(notes) + sum(1 for x in notes if x[2] > x[0])
+    return n * 600 / (max(max(x[0], x[2]) for x in notes) + 1500)
+
+
+def tune_level(make, lo=-0.5, hi=0.9, steps=14):
+    """make(bias) → 노트. 난이도가 LEVEL_TARGET 안(가운데 LEVEL_AIM 에 가깝게)이 되는 bias 를 찾는다.
+    bias 를 올리면 실제 어택이 있는 8분·16분 자리를 더 딛는다 (소리 없는 자리는 GHOST_MIN 으로 끝까지 뺀다).
+    끝까지 올려도 못 미치면 가장 높은 값으로 둔다."""
+    lo_t, hi_t = LEVEL_TARGET
+    best = None
+
+    def keep(bias, notes):
+        nonlocal best
+        v = raw_level(notes)
+        inside = lo_t <= v < hi_t + 0.005
+        key = (inside, -abs(v - LEVEL_AIM) if inside else (v if v < lo_t else -v))
+        if best is None or key > best[0]:
+            best = (key, bias, notes)
+        return v
+
+    if lo_t <= keep(0.0, n0 := make(0.0)) < hi_t:
+        return n0, 0.0
+    for _ in range(steps):
+        mid = (lo + hi) / 2
+        v = keep(mid, make(mid))
+        if lo_t <= v < hi_t and abs(v - LEVEL_AIM) < 0.02:
+            break
+        if v < LEVEL_AIM:
+            lo = mid
+        else:
+            hi = mid
+    return best[2], best[1]
 
 
 def read_levels(song_dir):
@@ -739,9 +827,15 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
     a["variacion"] = parse_ranges((meta.get(sid) or {}).get("variacion"))
     end = a["sound_end"]
     beat = to_notes(cut_tail(beat_steps(a), end))
-    beat_hard = to_notes(cut_tail(beat_steps_hard(a), end))
-    mus_steps, melody_s, holds = musical_steps(a)
-    musical = to_notes(cut_tail(mus_steps, end))
+    beat_hard, hard_bias = tune_level(lambda b: to_notes(cut_tail(beat_steps_hard(a, b), end)))
+    mus = {}
+
+    def make_musical(b):
+        mus[b] = musical_steps(a, b)
+        return to_notes(cut_tail(mus[b][0], end))
+
+    musical, mus_bias = tune_level(make_musical)
+    _, melody_s, holds = mus[mus_bias]
     check_no_overlap(beat)
     check_no_overlap(beat_hard)
     check_no_overlap(musical)
@@ -770,6 +864,7 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
         f"  {sid}: 걸음 {a['bpm']:.0f}/분 · 박자 easy {len(beat)}개(기본 {kinds['p']}·반박자 {kinds['h']}·싱커 {kinds['s']})"
         f" · hard {len(beat_hard)}개(8분 {hk['h']}·16분 {hk['q']}·싱커 {hk['s']})"
         f" · 종합 {len(musical)}개(길게 2박 {holds[2]}·4박 {holds[4]}, {melody_s:.0f}초)"
+        f" · 난이도 hard {chart_level(beat_hard)}({hard_bias:+.2f}) 종합 {chart_level(musical)}({mus_bias:+.2f})"
         f" · {time.time() - t0:.0f}초"
     )
 
