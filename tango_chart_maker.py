@@ -23,8 +23,8 @@
                (4분, 8분, 16분 연타, 싱코파, 3-3-2, 하바네라, 아라스트레…). 칸마다 따로 정하지 않아
                말이 되는 리듬만 나온다
              - 같은 선율이 되풀이되는 마디는 같은 리듬이 되게 서로 맞춘다
-             - 난이도(1분당 판정 수 ÷ 100)를 1.40~1.50 에 맞춘다: 실제 어택이 있는 8분·16분 자리를
-               더 딛거나 덜 딛는다 (종합도 같다). 소리 없는 자리는 채우지 않으니 못 미치는 곡도 있다
+             - 난이도(1분당 판정 수 ÷ 100)를 박자 hard 1.50~1.60, 종합 1.60~1.70 에 맞춘다: 실제 어택이 있는
+               8분·16분 자리를 먼저 더 딛고, 그래도 모자라면 소리가 약한 8분 → 16분 자리도 채운다
   모든 모드: 마르카토 박 격자를 박마다 가까운 실제 어택으로 다시 맞추고(루바토에 밀리지 않게),
              노트도 계산한 격자 자리가 아니라 가까운 실제 피아노·반도네온 어택에 붙인다
   musical  종합: 박자 hard 리듬(8분·16분)과 멜로디를 골고루 (MUSICAL_BASE 로 easy 걸음도 가능). 길게 이어지는 멜로디는 '길게 눌렀다 떼는' 노트로
@@ -41,7 +41,7 @@
 
 결과 (songs 폴더를 그대로 GitHub 저장소에 올린다)
   songs/index.json               곡 목록 (게임이 읽는다). 곡마다 모드별 난이도 level 도 적는다
-                                 (1분당 판정 수 ÷ 100, 0.7~1.5. 공홈 게임·순위와 같은 식)
+                                 (1분당 판정 수 ÷ 100, 0.7~2.0. 공홈 게임·순위와 같은 식)
   songs/<곡id>/audio.mp3         음원 (원본 그대로 복사)
   songs/<곡id>/beat.json         박자 easy 채보
   songs/<곡id>/beat_hard.json    박자 hard 채보 (8분·16분)
@@ -105,10 +105,13 @@ MIN_GAP_MS = 150                # 두 걸음 사이 최소 간격
 SOUND_END_RMS = 0.02  # 곡 끝 판단: 세기(95백분위 대비)가 이보다 작아지면 음악이 끝난 것
 SNAP_MS = 60                    # 노트를 이 안의 실제 피아노·반도네온 어택에 붙인다 (16분 간격의 30%를 넘지 않게 줄인다)
 SNAP_MIN = 0.20                 # 이보다 약한 어택에는 붙이지 않는다 (GHOST_MIN 과 같게: 남긴 노트는 모두 실제 어택에 붙는다)
-SNAP_NEAR = 0.5                 # 붙일 어택 고르기: 멀수록 세기를 깎는다 (창 끝에서 이만큼)
+SNAP_NEAR = 0.3                 # 붙일 어택 고르기: 멀수록 세기를 깎는다 (창 끝에서 이만큼)
+SNAP_PEAK = 3                   # 어택 봉우리 = 앞뒤 이 프레임(약 35ms) 안에서 가장 큰 곳 (오르는 비탈의 작은 혹에 붙지 않게)
 BEAT_SNAP_MS = 70               # 마르카토 박 격자를 이 안의 실제 어택으로 다시 맞춘다 (루바토·박 추적의 늦음 바로잡기)
-LEVEL_TARGET = (1.40, 1.50)     # 박자 hard·종합 난이도 목표. 실제 어택이 있는 8분·16분 자리를 더 딛거나 덜 딛어 맞춘다
-LEVEL_AIM = 1.45
+LEVEL_MAX = 2.0                 # 난이도 상한 (공홈 rhythm-engine chartLevel·DB _rhythm_level 과 같게)
+LEVEL_TARGET = {"beat_hard": (1.50, 1.60), "musical": (1.60, 1.70)}  # 난이도 목표 (가운데를 노린다)
+FILL_FROM = 0.9                 # bias 가 이보다 크면 소리가 약한 8분·16분 자리도 채운다 (어택만으로 목표에 못 미치는 곡)
+FILL_SPAN = 0.3                 # FILL_FROM 부터 이만큼 올리면 소리 없는 자리까지 다 채운다
 MELODY_MIN_S = 0.45             # 멜로디 노트 최소 길이(초)
 MELODY_MAX_SHARE = 0.40         # 종합: 곡 전체에서 멜로디(길게) 노트가 차지하는 최대 비율
 MELODY_PER_PHRASE = 2           # 종합: 한 프레이즈(4마디)에 멜로디 노트 최대 개수
@@ -232,16 +235,16 @@ def track_fine_beats(onset_env, duration):
 
 
 def nearest_attack(env, t, win_s, min_strength=SNAP_MIN):
-    """t 앞뒤 win_s 안의 어택 봉우리(앞뒤보다 큰 곳) 중 가깝고 센 것의 시각. 없으면 None.
+    """t 앞뒤 win_s 안의 어택 봉우리(앞뒤 SNAP_PEAK 프레임 안에서 가장 큰 곳) 중 가깝고 센 것의 시각. 없으면 None.
     창 안에서 가장 센 곳을 무조건 고르면 옆 16분의 센 어택으로 끌려가므로, 멀수록 깎는다."""
     fps = SR / HOP
     w = max(2, int(win_s * fps))
     c = int(round(t * fps))
-    a, b = max(1, c - w), min(len(env) - 1, c + w + 1)
+    a, b = max(SNAP_PEAK, c - w), min(len(env) - SNAP_PEAK, c + w + 1)
     best, best_k = 0.0, None
     for k in range(a, b):
         e = env[k]
-        if e < min_strength or e < env[k - 1] or e < env[k + 1]:
+        if e < min_strength or e < env[k - SNAP_PEAK:k + SNAP_PEAK + 1].max():
             continue
         score = e * (1 - SNAP_NEAR * abs(k - c) / w)
         if score > best:
@@ -479,7 +482,9 @@ def beat_steps_hard(a, bias=0.0):
     2) 같은 선율·화성이 되풀이되는 마디들은 서로의 점수를 더해서 고른다.
        그래서 되풀이되는 대목은 같은 리듬이 되고(외워서 딛기 좋다), 녹음 잡음에 덜 흔들린다.
     3) 노트를 실제 어택에 붙인다.
-    bias: 8분·16분 칸 비용을 이만큼 낮춘다(+ 더 딛고, − 덜 딛는다). 난이도 맞추기에 쓴다."""
+    bias: 8분·16분 칸 비용을 이만큼 낮춘다(+ 더 딛고, − 덜 딛는다). 난이도 맞추기에 쓴다.
+          FILL_FROM 을 넘으면 소리가 약한 자리도 남긴다 (8분 칸이 16분보다 싸서 8분부터 찬다)."""
+    ghost = GHOST_MIN * min(1.0, max(0.0, 1 - (bias - FILL_FROM) / FILL_SPAN))
     if "_bars" not in a:
         a["_bars"] = hard_bars(a)
     bars = a["_bars"]
@@ -523,7 +528,7 @@ def beat_steps_hard(a, bias=0.0):
             if ch != "x":
                 continue
             # 되풀이 맞춤으로 골랐어도 그 자리에 소리가 없으면 딛지 않는다
-            if q and strength_at(a["pb"], b["times"][k], 0.025) < GHOST_MIN:
+            if q and strength_at(a["pb"], b["times"][k], 0.025) < ghost:
                 continue
             if q == 0:
                 kind = "p"
@@ -707,14 +712,14 @@ META_KEYS = ("title", "orchestra", "singer", "year", "added")  # meta.json 으�
 
 
 def chart_level(notes):
-    """난이도 배수 = 1분당 판정 수 ÷ 100 (0.7~1.5, 소수 둘째 자리).
+    """난이도 배수 = 1분당 판정 수 ÷ 100 (0.7~LEVEL_MAX, 소수 둘째 자리).
     공홈 게임(rhythm-engine.ts chartLevel)·순위 DB(_rhythm_level)와 같은 식:
     판정 수 = 노트 + 긴 노트 뗌, 길이 = 마지막 노트 끝 + 1.5초"""
     if not notes:
         return 0.7
     n = len(notes) + sum(1 for x in notes if x[2] > x[0])
     dur = max(max(x[0], x[2]) for x in notes) + 1500
-    v = min(1.5, max(0.7, n * 600 / dur))
+    v = min(LEVEL_MAX, max(0.7, n * 600 / dur))
     return int(v * 100 + 0.5 + 1e-9) / 100  # 자바스크립트 Math.round 와 같게 (반올림)
 
 
@@ -726,18 +731,19 @@ def raw_level(notes):
     return n * 600 / (max(max(x[0], x[2]) for x in notes) + 1500)
 
 
-def tune_level(make, lo=-0.5, hi=0.9, steps=14):
-    """make(bias) → 노트. 난이도가 LEVEL_TARGET 안(가운데 LEVEL_AIM 에 가깝게)이 되는 bias 를 찾는다.
-    bias 를 올리면 실제 어택이 있는 8분·16분 자리를 더 딛는다 (소리 없는 자리는 GHOST_MIN 으로 끝까지 뺀다).
+def tune_level(make, target, lo=-0.5, hi=FILL_FROM + FILL_SPAN + 0.6, steps=16):
+    """make(bias) → 노트. 난이도가 target(낮음, 높음) 안(가운데에 가깝게)이 되는 bias 를 찾는다.
+    bias 를 올리면 실제 어택이 있는 8분·16분 자리를 먼저 더 딛고, 그래도 모자라면 소리가 약한 자리도 채운다.
     끝까지 올려도 못 미치면 가장 높은 값으로 둔다."""
-    lo_t, hi_t = LEVEL_TARGET
+    lo_t, hi_t = target
+    aim = (lo_t + hi_t) / 2
     best = None
 
     def keep(bias, notes):
         nonlocal best
         v = raw_level(notes)
         inside = lo_t <= v < hi_t + 0.005
-        key = (inside, -abs(v - LEVEL_AIM) if inside else (v if v < lo_t else -v))
+        key = (inside, -abs(v - aim) if inside else (v if v < lo_t else -v))
         if best is None or key > best[0]:
             best = (key, bias, notes)
         return v
@@ -747,9 +753,9 @@ def tune_level(make, lo=-0.5, hi=0.9, steps=14):
     for _ in range(steps):
         mid = (lo + hi) / 2
         v = keep(mid, make(mid))
-        if lo_t <= v < hi_t and abs(v - LEVEL_AIM) < 0.02:
+        if lo_t <= v < hi_t and abs(v - aim) < 0.02:
             break
-        if v < LEVEL_AIM:
+        if v < aim:
             lo = mid
         else:
             hi = mid
@@ -827,14 +833,14 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
     a["variacion"] = parse_ranges((meta.get(sid) or {}).get("variacion"))
     end = a["sound_end"]
     beat = to_notes(cut_tail(beat_steps(a), end))
-    beat_hard, hard_bias = tune_level(lambda b: to_notes(cut_tail(beat_steps_hard(a, b), end)))
+    beat_hard, hard_bias = tune_level(lambda b: to_notes(cut_tail(beat_steps_hard(a, b), end)), LEVEL_TARGET["beat_hard"])
     mus = {}
 
     def make_musical(b):
         mus[b] = musical_steps(a, b)
         return to_notes(cut_tail(mus[b][0], end))
 
-    musical, mus_bias = tune_level(make_musical)
+    musical, mus_bias = tune_level(make_musical, LEVEL_TARGET["musical"])
     _, melody_s, holds = mus[mus_bias]
     check_no_overlap(beat)
     check_no_overlap(beat_hard)
