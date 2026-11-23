@@ -794,7 +794,7 @@ def check_no_overlap(notes):
 # ── 출력 ────────────────────────────────────────────────────
 MODE_NAMES = ("beat", "beat_hard", "musical", "hell")
 META_KEYS = ("title", "orchestra", "singer", "year", "added")  # meta.json 으로 고칠 수 있는 곡 정보
-# meta.json 에 "hell": true 인 곡만 Hell 채보(hell.json)를 만든다 (연습용, 공홈 게임에서 기록·순위에 남지 않음)
+# meta.json 에 "hell": true 인 곡만 Hell 채보(hell.json)를 만든다 (공홈 게임에서 박자 hard·종합처럼 기록·순위에 남는다)
 
 
 def chart_level(notes):
