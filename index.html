@@ -187,7 +187,7 @@ const MODES=[
  ['beat','박자 easy','탱고의 기본 걸음에 반박자(doble tiempo)와 싱커페이션을 더했어요. 박을 몸에 익히기 좋아요. 처음이라면 여기서 시작하세요.'],
  ['beat_hard','박자 hard','피아노·반도네온이 치는 8분음표와 16분음표 연타까지 딛어요. 박자 easy 에 익숙해지면 도전하세요.'],
  ['musical','종합','박자 hard 리듬(8분·16분)에 멜로디를 더했어요. 길게 흐르는 멜로디는 2박·4박 동안 길게 눌렀다가 떼요.'],
- ['hell','Hell','피아노·반도네온이 치는 어택을 거의 모두 딛어요. 아주 촘촘해서 가장 어려워요. Hell 곡만 따로 있어요.']];
+ ['hell','Hell','피아노·반도네온이 치는 여린 어택까지 거의 모두 딛어요. 판정도 더 엄격해요 (PERFECT ±30ms · GREAT ±60ms · GOOD ±100ms). Hell 곡만 따로 있어요.']];
 const modeLabel=m=>(MODES.find(x=>x[0]===m)||[m,m])[1];
 const store={get(k,d){try{const v=localStorage.getItem('trt.'+k);return v==null?d:JSON.parse(v)}catch(e){return d}},
  set(k,v){try{localStorage.setItem('trt.'+k,JSON.stringify(v))}catch(e){}}};
@@ -331,7 +331,7 @@ $('#file').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)
  if(pick.song)loadSelected()})();
 
 /* ===== 게임 ===== */
-const cv=$('#c'),g=cv.getContext('2d'),LEAD=3000,KEYS=['f','j'],N=2,WIN=135,EARLY_MISS=250;
+const cv=$('#c'),g=cv.getContext('2d'),LEAD=3000,KEYS=['f','j'],N=2,EARLY_MISS=250;let WIN=135;
 const C={bg:'#16110f',lane:'rgba(237,228,211,.045)',edge:'rgba(237,228,211,.09)',note:'#ede4d3',gold:'#d8bc84',muted:'#b8ab97',miss:'#e0857a'};
 const JC={PERFECT:C.gold,GREAT:C.note,GOOD:C.muted,MISS:C.miss};
 const fine=matchMedia('(pointer:fine)').matches;
@@ -349,6 +349,7 @@ async function start(r){if(!r)return;
   if(!r.audio&&r.v2){if(!r.v2.audio)r.v2.audio=await new Promise((ok,no)=>ctx.decodeAudioData(r.v2.buf.slice(0),ok,no));r.audio=r.v2.audio}
   if(!r.audio){const k=Object.keys(r.zip.files).find(n=>n.toLowerCase()===r.chart.audio.toLowerCase());if(!k)throw new Error('음악 파일을 찾지 못했어요');
    const ab=await r.zip.files[k].async('arraybuffer');r.audio=await new Promise((ok,no)=>ctx.decodeAudioData(ab,ok,no))}
+  JW=pick.mode==='hell'?JUDGE.hell:JUDGE.normal;WIN=JW[2];
   notes=r.notes?r.notes.map(n=>({...n,done:0,fin:n.hold?0:1})):buildNotes(r.chart);
   st={sc:0,n:0,combo:0,max:0,j:'',jt:-1e9,cnt:{P:0,G:0,O:0,M:0},dts:[],early:0,late:0,sp:+sp.value,off:+of.value,end:Math.max(...notes.map(n=>n.e))+1500};
   flash=[0,0];fx=[];down=[false,false];holding=[null,null];playing=r;paused=false;$('#pause').classList.remove('on');
@@ -376,7 +377,9 @@ function buildNotes(c){const lane=o=>c.cs===2?Math.min(1,Math.floor(o.x*2/512)):
 function hit(r,l,big){st.sc+=r[1];st.n++;st.cnt[r[2]]++;st.combo++;st.max=Math.max(st.max,st.combo);st.j=r[0];st.jt=performance.now();
  fx.push({l,t:performance.now(),c:JC[r[0]],big})}
 function missOne(why){st.sc-=100;st.n++;st.cnt.M++;st.combo=0;st.j='MISS';st.jd=why||'';st.jt=performance.now()}
-const grade3=d=>d<=45?['PERFECT',100,'P']:d<=90?['GREAT',70,'G']:['GOOD',40,'O'];
+// 판정 폭(ms): PERFECT·GREAT·GOOD 까지(이보다 멀면 MISS). Hell 은 더 좁게. 점수 PERFECT 1·GREAT 0.8·GOOD 0.5 (공홈과 같게)
+const JUDGE={normal:[45,90,135],hell:[30,60,100]};let JW=JUDGE.normal;
+const grade3=d=>d<=JW[0]?['PERFECT',100,'P']:d<=JW[1]?['GREAT',80,'G']:['GOOD',50,'O'];
 /* 긴 노트에서 발을 뗐을 때 */
 function release(l){down[l]=false;const n=holding[l];if(!n||!st)return;holding[l]=null;if(n.fin)return;n.fin=1;
  const early=n.e-now();if(early<=WIN){hit(grade3(Math.max(0,early)),l,false);st.jd=''}else missOne('일찍 뗌')}
