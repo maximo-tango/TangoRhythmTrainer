@@ -122,6 +122,9 @@ FILL_SPAN = 0.3                 # FILL_FROM 부터 이만큼 올리면 소리 �
 MELODY_MIN_S = 0.45             # 멜로디 노트 최소 길이(초)
 MELODY_MAX_SHARE = 0.40         # 종합: 곡 전체에서 멜로디(길게) 노트가 차지하는 최대 비율
 MELODY_PER_PHRASE = 2           # 종합: 한 프레이즈(4마디)에 멜로디 노트 최대 개수
+HELL_MIN = 0.15                 # Hell: 이보다 센 어택은 모두 딛는다 (박자 hard 노트는 다 넣고 그 사이를 채운다)
+HELL_GAP_MS = 70                # Hell: 두 노트 사이 최소 간격 (가까우면 센 쪽을 남긴다)
+HELL_PEAK = 2                   # Hell: 어택 봉우리 = 앞뒤 이 프레임(약 23ms) 안에서 가장 큰 곳
 MUSICAL_BASE = "hard"            # 종합: 멜로디를 얹을 박자 채보 ("hard" 8분·16분 리듬 / "easy" 기본 걸음)
 
 
@@ -594,6 +597,35 @@ def beat_steps_hard(a, bias=0.0):
     return thin_steps(snap_steps(steps, a["pb"], sixteenth))
 
 
+def hell_steps(a, base):
+    """Hell: [(초, 종류, 강박)] — 박자 hard 노트(base, [ms, 발, 끝, 종류, 강박])에 더해 피아노·반도네온의
+    어택(pb 봉우리)을 세기 HELL_MIN 이상이면 모두 딛는다. HELL_GAP_MS 보다 가까우면 박자 hard 노트, 그다음 센 어택을 남긴다.
+    종류는 마르카토 박(fine) 격자에서의 자리로 (박 p, 8분 h, 16분·그 밖 q), 강박은 마디 첫 박"""
+    pb, fps = a["pb"], SR / HOP
+    cand = [(1e9, n[0] / 1000) for n in base]
+    for k in range(HELL_PEAK, len(pb) - HELL_PEAK):
+        if pb[k] >= HELL_MIN and pb[k] >= pb[k - HELL_PEAK:k + HELL_PEAK + 1].max():
+            cand.append((float(pb[k]), k / fps))
+    cand.sort(reverse=True)
+    gap = HELL_GAP_MS / 1000
+    kept = []
+    for _, t in cand:
+        i = np.searchsorted(kept, t)
+        if (i > 0 and t - kept[i - 1] < gap) or (i < len(kept) and kept[i] - t < gap):
+            continue
+        kept.insert(i, t)
+    fine, bars = a["fine"], a["pulses"][a["bar_phase"]::2]
+    steps = []
+    for t in kept:
+        i = int(np.clip(np.searchsorted(fine, t) - 1, 0, len(fine) - 2))
+        r = int(round((t - fine[i]) / (fine[i + 1] - fine[i]) * 4))
+        if r >= 4:
+            i, r = i + 1, 0
+        kind = "p" if r == 0 else "h" if r == 2 else "q"
+        steps.append((t, kind, r == 0 and float(np.min(np.abs(bars - fine[i]))) < 0.002))
+    return steps
+
+
 def cut_tail(steps, end):
     """음악이 끝난 뒤의 걸음은 버리고, 길게 누르기는 끝 시각까지만"""
     out = []
@@ -760,8 +792,9 @@ def check_no_overlap(notes):
 
 
 # ── 출력 ────────────────────────────────────────────────────
-MODE_NAMES = ("beat", "beat_hard", "musical")
+MODE_NAMES = ("beat", "beat_hard", "musical", "hell")
 META_KEYS = ("title", "orchestra", "singer", "year", "added")  # meta.json 으로 고칠 수 있는 곡 정보
+# meta.json 에 "hell": true 인 곡만 Hell 채보(hell.json)를 만든다 (연습용, 공홈 게임에서 기록·순위에 남지 않음)
 
 
 def chart_level(notes):
@@ -900,9 +933,14 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
     check_no_overlap(beat)
     check_no_overlap(beat_hard)
     check_no_overlap(musical)
+    hell = None
+    if (meta.get(sid) or {}).get("hell"):
+        hell = refine_notes(to_notes(cut_tail(hell_steps(a, beat_hard), end)), a)
+        check_no_overlap(hell)
     song_dir.mkdir(parents=True, exist_ok=True)  # 분석이 된 곡만 폴더를 만든다
     shutil.copyfile(path, song_dir / audio_name)
-    for mode, notes in (("beat", beat), ("beat_hard", beat_hard), ("musical", musical)):
+    charts = {"beat": beat, "beat_hard": beat_hard, "musical": musical, **({"hell": hell} if hell else {})}
+    for mode, notes in charts.items():
         write_json(song_dir / f"{mode}.json", {"version": VERSION, "mode": mode, "bpm": round(a["bpm"], 1), "notes": notes})
     kinds = {k3: sum(1 for x in beat if x[3] == k3) for k3 in ("p", "h", "s")}
     hk = {k3: sum(1 for x in beat_hard if x[3] == k3) for k3 in ("p", "h", "q", "s")}
@@ -914,9 +952,9 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
         "duration_ms": int(a["duration"] * 1000),
         "bpm": round(a["bpm"], 1),
         "audio": f"{sid}/{audio_name}",
-        "modes": {"beat": f"{sid}/beat.json", "beat_hard": f"{sid}/beat_hard.json", "musical": f"{sid}/musical.json"},
-        "notes": {"beat": len(beat), "beat_hard": len(beat_hard), "musical": len(musical)},
-        "level": {"beat": chart_level(beat), "beat_hard": chart_level(beat_hard), "musical": chart_level(musical)},
+        "modes": {m: f"{sid}/{m}.json" for m in charts},
+        "notes": {m: len(n) for m, n in charts.items()},
+        "level": {m: chart_level(n) for m, n in charts.items()},
         "md5": digest,
         "source": path.name,
         **({"added": added} if added else {}),
@@ -926,7 +964,8 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
         f" · hard {len(beat_hard)}개(8분 {hk['h']}·16분 {hk['q']}·싱커 {hk['s']})"
         f" · 종합 {len(musical)}개(길게 2박 {holds[2]}·4박 {holds[4]}, {melody_s:.0f}초)"
         f" · 난이도 hard {chart_level(beat_hard)}({hard_bias:+.2f}) 종합 {chart_level(musical)}({mus_bias:+.2f})"
-        f" · {time.time() - t0:.0f}초"
+        + (f" · Hell {len(hell)}개 난이도 {chart_level(hell)}" if hell else "")
+        + f" · {time.time() - t0:.0f}초"
     )
 
 

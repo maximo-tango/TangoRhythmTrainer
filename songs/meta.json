@@ -38,6 +38,7 @@
   "pedro-laurenz-abandono": { "title": "Abandono", "orchestra": "Pedro Laurenz", "singer": "", "year": "1937", "variacion": [["2:07", "2:34"]] },
   "pedro-laurenz-amurado": { "title": "Amurado", "orchestra": "Pedro Laurenz", "singer": "", "year": "1940", "variacion": [["1:03", "1:27"], ["2:04", "2:30"]] },
   "pedro-laurenz-jorge-linares-naranjo-en-flor": { "orchestra": "Pedro Laurenz", "title": "Naranjo en Flor", "singer": "Jorge Linares" },
+  "pedro-laurenz-milonga-compadre": { "orchestra": "Pedro Laurenz", "title": "Milonga Compadre", "singer": "Juan Carlos Casas", "year": "1938", "hell": true },
   "pedro-laurenz-no-me-extrana": { "title": "No Me Extraña", "orchestra": "Pedro Laurenz", "singer": "", "year": "", "variacion": [["2:24", "2:47"]] },
   "raza-criolla-el-taita": { "orchestra": "", "title": "Raza Criolla (El Taita)" },
   "ricardo-tanturi-cuatro-compases": { "orchestra": "Ricardo Tanturi", "title": "Cuatro Compases", "singer": "Alberto Castillo", "year": "1942" },
