@@ -122,8 +122,10 @@ FILL_SPAN = 0.3                 # FILL_FROM 부터 이만큼 올리면 소리 �
 MELODY_MIN_S = 0.45             # 멜로디 노트 최소 길이(초)
 MELODY_MAX_SHARE = 0.40         # 종합: 곡 전체에서 멜로디(길게) 노트가 차지하는 최대 비율
 MELODY_PER_PHRASE = 2           # 종합: 한 프레이즈(4마디)에 멜로디 노트 최대 개수
-HELL_MIN = 0.15                 # Hell: 이보다 센 어택은 모두 딛는다 (박자 hard 노트는 다 넣고 그 사이를 채운다)
-HELL_GAP_MS = 70                # Hell: 두 노트 사이 최소 간격 (가까우면 센 쪽을 남긴다)
+HELL_MIN = 0.25                 # Hell: 어택 세기(pb)가 이 이상이고
+HELL_RISE = 0.12                # Hell: 소리가 커지는 빠르기(곡의 센 어택 대비)가 이 이상인 자리를 모두 딛는다 (뚜렷한 어택만)
+HELL_BASE_RISE = 0.05           # Hell: 박자 hard 노트도 커지는 빠르기가 이보다 작으면(들리는 어택이 없으면) 뺀다
+HELL_GAP_MS = 100               # Hell: 두 노트 사이 최소 간격 (한 소리를 두 번 잡지 않게. 가까우면 박자 hard·뚜렷한 쪽을 남긴다)
 HELL_PEAK = 2                   # Hell: 어택 봉우리 = 앞뒤 이 프레임(약 23ms) 안에서 가장 큰 곳
 MUSICAL_BASE = "hard"            # 종합: 멜로디를 얹을 박자 채보 ("hard" 8분·16분 리듬 / "easy" 기본 걸음)
 
@@ -597,15 +599,35 @@ def beat_steps_hard(a, bias=0.0):
     return thin_steps(snap_steps(steps, a["pb"], sixteenth))
 
 
+def attack_rise(a, t):
+    """t 앞 REFINE_BACK_MS ~ 뒤 REFINE_FWD_MS 안에서 소리가 커지는 빠르기의 최대 (곡의 센 어택=1)"""
+    slope, fps = a["fine_slope"], SR / FINE_HOP
+    lo, hi = max(0, int((t - REFINE_BACK_MS / 1000) * fps)), min(len(slope), int((t + REFINE_FWD_MS / 1000) * fps) + 1)
+    return float(slope[lo:hi].max()) if hi > lo else 0.0
+
+
 def hell_steps(a, base):
-    """Hell: [(초, 종류, 강박)] — 박자 hard 노트(base, [ms, 발, 끝, 종류, 강박])에 더해 피아노·반도네온의
-    어택(pb 봉우리)을 세기 HELL_MIN 이상이면 모두 딛는다. HELL_GAP_MS 보다 가까우면 박자 hard 노트, 그다음 센 어택을 남긴다.
+    """Hell: [(초, 종류, 강박)] — 뚜렷하게 들리는 피아노·반도네온 어택을 거의 모두 딛는다.
+    후보 = 박자 hard 노트(base, [ms, 발, 끝, 종류, 강박]) + 어택 봉우리(pb ≥ HELL_MIN 이고 커지는 빠르기 ≥ HELL_RISE).
+    후보마다 먼저 어택 정밀 보정(refine_time)을 해서 실제로 커지는 순간으로 옮긴 뒤, HELL_GAP_MS 안에 둘이면
+    박자 hard 노트, 그다음 뚜렷한 쪽을 남긴다 (한 소리를 두 번 잡거나, 보정 뒤 겹치는 것을 막는다).
+    박자 hard 노트라도 들리는 어택이 없으면(커지는 빠르기 < HELL_BASE_RISE) 뺀다.
     종류는 마르카토 박(fine) 격자에서의 자리로 (박 p, 8분 h, 16분·그 밖 q), 강박은 마디 첫 박"""
     pb, fps = a["pb"], SR / HOP
-    cand = [(1e9, n[0] / 1000) for n in base]
+    cand = []
+    for n in base:
+        t = n[0] / 1000
+        r = attack_rise(a, t)
+        if r >= HELL_BASE_RISE:
+            cand.append((10 + r, refine_time(a, t)))
     for k in range(HELL_PEAK, len(pb) - HELL_PEAK):
         if pb[k] >= HELL_MIN and pb[k] >= pb[k - HELL_PEAK:k + HELL_PEAK + 1].max():
-            cand.append((float(pb[k]), k / fps))
+            t = k / fps
+            r = attack_rise(a, t)
+            if r >= HELL_RISE:
+                t2 = refine_time(a, t)
+                if t2 != t:  # 커지는 비탈을 찾은 어택만
+                    cand.append((r, t2))
     cand.sort(reverse=True)
     gap = HELL_GAP_MS / 1000
     kept = []
@@ -936,7 +958,7 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
     check_no_overlap(musical)
     hell = None
     if (meta.get(sid) or {}).get("hell"):
-        hell = refine_notes(to_notes(cut_tail(hell_steps(a, beat_hard), end)), a)
+        hell = to_notes(cut_tail(hell_steps(a, beat_hard), end))  # hell_steps 가 이미 어택 정밀 보정을 한다
         check_no_overlap(hell)
     song_dir.mkdir(parents=True, exist_ok=True)  # 분석이 된 곡만 폴더를 만든다
     shutil.copyfile(path, song_dir / audio_name)
