@@ -79,6 +79,7 @@ import numpy as np
 
 try:
     import librosa
+    import scipy.signal as sps  # librosa 와 함께 설치된다
 except ImportError:  # pragma: no cover
     print("librosa 가 없습니다. 먼저 설치하세요:  pip install librosa soundfile numpy mutagen")
     sys.exit(1)
@@ -107,6 +108,12 @@ SNAP_MS = 60                    # 노트를 이 안의 실제 피아노·반도�
 SNAP_MIN = 0.20                 # 이보다 약한 어택에는 붙이지 않는다 (GHOST_MIN 과 같게: 남긴 노트는 모두 실제 어택에 붙는다)
 SNAP_NEAR = 0.3                 # 붙일 어택 고르기: 멀수록 세기를 깎는다 (창 끝에서 이만큼)
 SNAP_PEAK = 3                   # 어택 봉우리 = 앞뒤 이 프레임(약 35ms) 안에서 가장 큰 곳 (오르는 비탈의 작은 혹에 붙지 않게)
+FINE_HOP = 32                   # 어택 정밀 보정: 1.45ms 간격으로 세기를 잰다 (분석 간격 HOP 의 1/8)
+FINE_WIN = 256                  # 어택 정밀 보정: 세기를 재는 창 11.6ms
+REFINE_BACK_MS = 35             # 어택 정밀 보정: 노트 앞 이만큼 ~
+REFINE_FWD_MS = 10              # ~ 뒤 이만큼 안에서 소리가 가장 가파르게 커지는 순간으로 옮긴다
+REFINE_MIN_GAP_MS = 40          # 어택 정밀 보정: 옮긴 뒤 앞 노트와 이보다 가까워지면 옮기지 않는다
+REFINE_MIN_RISE = 0.03          # 어택 정밀 보정: 커지는 빠르기가 곡의 센 어택(99백분위)의 이 비율보다 작으면 (소리가 거의 없는 자리) 옮기지 않는다
 BEAT_SNAP_MS = 70               # 마르카토 박 격자를 이 안의 실제 어택으로 다시 맞춘다 (루바토·박 추적의 늦음 바로잡기)
 LEVEL_MAX = 2.0                 # 난이도 상한 (공홈 rhythm-engine chartLevel·DB _rhythm_level 과 같게)
 LEVEL_TARGET = {"beat_hard": (1.50, 1.60), "musical": (1.60, 1.70)}  # 난이도 목표 (가운데를 노린다)
@@ -266,6 +273,51 @@ def snap_steps(steps, env, sixteenth=None):
     return out
 
 
+def fine_attack_slope(y_p):
+    """어택 정밀 보정용: 타악 성분의 피아노·반도네온 음역(150~4000Hz) 세기가 커지는 빠르기를 1.45ms 간격으로.
+    분석 세기(onset_strength, 11.6ms 간격·93ms 창)의 봉우리는 소리가 커지는 순간보다 평균 17~20ms 늦어서
+    (어택을 다 지나 세기가 거의 꼭대기일 때), 노트를 소리가 가장 가파르게 커지는 순간으로 다시 옮기는 데 쓴다."""
+    sos = sps.butter(4, [150, 4000], btype="band", fs=SR, output="sos")
+    yb = sps.sosfiltfilt(sos, y_p)
+    energy = librosa.feature.rms(y=yb, frame_length=FINE_WIN, hop_length=FINE_HOP, center=True)[0] ** 2
+    slope = np.gradient(sps.savgol_filter(energy, 7, 2))
+    return slope / (float(np.percentile(slope, 99)) + 1e-12)
+
+
+def refine_time(a, t):
+    """t(초) 앞 REFINE_BACK_MS ~ 뒤 REFINE_FWD_MS 안에서 소리가 가장 가파르게 커지는 순간. 커지는 곳이 없으면 t"""
+    slope = a["fine_slope"]
+    fps = SR / FINE_HOP
+    lo = max(0, int((t - REFINE_BACK_MS / 1000) * fps))
+    hi = min(len(slope), int((t + REFINE_FWD_MS / 1000) * fps) + 1)
+    if hi - lo < 3:
+        return t
+    k = lo + int(np.argmax(slope[lo:hi]))
+    # 창 끝에서 고른 것은 봉우리가 아니라 비탈(창 밖으로 더 커진다): 옮기지 않는다
+    if slope[k] < REFINE_MIN_RISE or k in (lo, hi - 1):
+        return t
+    return k / fps
+
+
+def refine_notes(notes, a):
+    """채보의 노트 시작을 실제 어택(소리가 가장 가파르게 커지는 순간)으로 다시 맞춘다 (모든 모드 공통, 마지막 단계).
+    길게 누르는 노트의 끝도 다음 어택 자리라 같은 식으로 맞추고, 다음 노트보다 늦으면 다음 노트 시작에서 끝낸다.
+    앞 노트와 REFINE_MIN_GAP_MS 보다 가까워지거나 순서가 바뀌면 그 노트는 그대로 둔다."""
+    out = []
+    prev = -1e9
+    for n in notes:
+        ms = int(round(refine_time(a, n[0] / 1000) * 1000))
+        end = int(round(refine_time(a, n[2] / 1000) * 1000)) if n[2] else 0
+        if ms - prev < REFINE_MIN_GAP_MS or (end and end - ms < REFINE_MIN_GAP_MS):
+            ms, end = n[0], n[2]
+        out.append([ms, n[1], end, *n[3:]])
+        prev = ms
+    for cur, nxt in zip(out, out[1:]):
+        if cur[2] and nxt[0] < cur[2]:
+            cur[2] = nxt[0]
+    return out
+
+
 def refine_beats(beats, env):
     """박 추적은 박 간격을 고르게 펴서 실제 어택보다 늦거나 이르다. 박마다 가까운 실제 어택으로 옮긴다.
     옮긴 뒤 앞뒤 박 간격이 원래의 60%보다 좁아지면 그 박은 그대로 둔다."""
@@ -335,6 +387,7 @@ def analyze(path):
         "rms": rms,
         "rms_h": rms_h,
         "rms_p": rms_p,
+        "fine_slope": fine_attack_slope(y_p),
         "pulses": pulses,
         "fine": fine,
         "bar_phase": bar_phase,
@@ -832,8 +885,9 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
     a = analyze(path)
     a["variacion"] = parse_ranges((meta.get(sid) or {}).get("variacion"))
     end = a["sound_end"]
-    beat = to_notes(cut_tail(beat_steps(a), end))
+    beat = refine_notes(to_notes(cut_tail(beat_steps(a), end)), a)
     beat_hard, hard_bias = tune_level(lambda b: to_notes(cut_tail(beat_steps_hard(a, b), end)), LEVEL_TARGET["beat_hard"])
+    beat_hard = refine_notes(beat_hard, a)
     mus = {}
 
     def make_musical(b):
@@ -841,6 +895,7 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
         return to_notes(cut_tail(mus[b][0], end))
 
     musical, mus_bias = tune_level(make_musical, LEVEL_TARGET["musical"])
+    musical = refine_notes(musical, a)
     _, melody_s, holds = mus[mus_bias]
     check_no_overlap(beat)
     check_no_overlap(beat_hard)
