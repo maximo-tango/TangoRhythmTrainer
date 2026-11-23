@@ -794,7 +794,7 @@ def check_no_overlap(notes):
 # ── 출력 ────────────────────────────────────────────────────
 MODE_NAMES = ("beat", "beat_hard", "musical", "hell")
 META_KEYS = ("title", "orchestra", "singer", "year", "added")  # meta.json 으로 고칠 수 있는 곡 정보
-# meta.json 에 "hell": true 인 곡만 Hell 채보(hell.json)를 만든다 (공홈 게임에서 박자 hard·종합처럼 기록·순위에 남는다)
+# meta.json 에 "hell": true 인 곡만 Hell 채보(hell.json)를 만든다. 그 곡은 박자 easy·Hell 만 내놓는다 (박자 hard·종합에는 안 나옴)
 
 
 def chart_level(notes):
@@ -907,7 +907,8 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
     info.update({k2: v for k2, v in (meta.get(sid) or {}).items() if k2 in META_KEYS})
     song_dir = out_dir / sid
     audio_name = "audio" + path.suffix.lower()
-    if skip_existing and all((song_dir / f"{m}.json").exists() for m in ("beat", "beat_hard", "musical")):
+    want = ("beat", "hell") if (meta.get(sid) or {}).get("hell") else ("beat", "beat_hard", "musical")
+    if skip_existing and all((song_dir / f"{m}.json").exists() for m in want):
         prev = catalog.get(sid, {})
         prev.update(info)
         prev["level"] = read_levels(song_dir)
@@ -939,7 +940,11 @@ def process(path, out_dir, meta, catalog, seen, skip_existing):
         check_no_overlap(hell)
     song_dir.mkdir(parents=True, exist_ok=True)  # 분석이 된 곡만 폴더를 만든다
     shutil.copyfile(path, song_dir / audio_name)
-    charts = {"beat": beat, "beat_hard": beat_hard, "musical": musical, **({"hell": hell} if hell else {})}
+    # Hell 곡은 박자 easy·Hell 만 (박자 hard·종합 순위에는 나오지 않게)
+    charts = {"beat": beat, "hell": hell} if hell else {"beat": beat, "beat_hard": beat_hard, "musical": musical}
+    for mode in MODE_NAMES:
+        if mode not in charts:
+            (song_dir / f"{mode}.json").unlink(missing_ok=True)
     for mode, notes in charts.items():
         write_json(song_dir / f"{mode}.json", {"version": VERSION, "mode": mode, "bpm": round(a["bpm"], 1), "notes": notes})
     kinds = {k3: sum(1 for x in beat if x[3] == k3) for k3 in ("p", "h", "s")}

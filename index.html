@@ -186,7 +186,8 @@ if(EMBED)document.documentElement.classList.add('embed');
 const MODES=[
  ['beat','박자 easy','탱고의 기본 걸음에 반박자(doble tiempo)와 싱커페이션을 더했어요. 박을 몸에 익히기 좋아요. 처음이라면 여기서 시작하세요.'],
  ['beat_hard','박자 hard','피아노·반도네온이 치는 8분음표와 16분음표 연타까지 딛어요. 박자 easy 에 익숙해지면 도전하세요.'],
- ['musical','종합','박자 hard 리듬(8분·16분)에 멜로디를 더했어요. 가장 어려워요. 길게 흐르는 멜로디는 2박·4박 동안 길게 눌렀다가 떼요.']];
+ ['musical','종합','박자 hard 리듬(8분·16분)에 멜로디를 더했어요. 길게 흐르는 멜로디는 2박·4박 동안 길게 눌렀다가 떼요.'],
+ ['hell','Hell','피아노·반도네온이 치는 어택을 거의 모두 딛어요. 아주 촘촘해서 가장 어려워요. Hell 곡만 따로 있어요.']];
 const modeLabel=m=>(MODES.find(x=>x[0]===m)||[m,m])[1];
 const store={get(k,d){try{const v=localStorage.getItem('trt.'+k);return v==null?d:JSON.parse(v)}catch(e){return d}},
  set(k,v){try{localStorage.setItem('trt.'+k,JSON.stringify(v))}catch(e){}}};
@@ -273,8 +274,10 @@ const bestKey=(id,mode)=>'best.'+id+'|'+mode;
 /* 새로 올린 곡: 추가된 지 2주 동안 New (생성기가 index.json 에 added 를 적는다) */
 const NEW_DAYS=14,isNew=s=>{const t=s.added&&Date.parse(s.added+'T00:00:00');return !!t&&Date.now()-t<NEW_DAYS*864e5};
 function renderSongs(){const box=$('#songs'),q=fold($('#q').value);
- const list=songs.filter(s=>!q||fold(songLabel(s)+' '+songSub(s)).includes(q));
- $('#songCount').textContent=songs.length?songs.length+'곡':'';
+ // 고른 모드의 채보가 있는 곡만 (Hell 곡은 박자 hard·종합에 안 나오고, Hell 에는 Hell 곡만)
+ const inMode=songs.filter(s=>s.files[pick.mode]);
+ const list=inMode.filter(s=>!q||fold(songLabel(s)+' '+songSub(s)).includes(q));
+ $('#songCount').textContent=inMode.length?inMode.length+'곡':'';
  if(!songs.length){box.innerHTML='<p class="empty">곡 목록이 없어요. 아래 설정에서 내 기기의 채보 파일을 열 수 있어요.</p>';return}
  if(!list.length){box.innerHTML='<p class="empty">찾는 곡이 없어요.</p>';return}
  box.innerHTML=list.map(s=>{const b=store.get(bestKey(s.id,pick.mode),null),sub=songSub(s);
@@ -286,9 +289,10 @@ $('#songs').onclick=e=>{const b=e.target.closest('.song');if(!b)return;pick.song
 $('#q').oninput=renderSongs;
 
 function renderModes(){const s=songs.find(x=>x.id===pick.song);
- $('#modes').innerHTML=MODES.map(([m,l])=>'<button class="chip" data-m="'+m+'" aria-pressed="'+(m===pick.mode)+'"'+(s&&!s.files[m]?' disabled':'')+'>'+l+'</button>').join('');
+ $('#modes').innerHTML=MODES.map(([m,l])=>'<button class="chip" data-m="'+m+'" aria-pressed="'+(m===pick.mode)+'">'+l+'</button>').join('');
  $('#modeDesc').textContent=(MODES.find(x=>x[0]===pick.mode)||MODES[0])[2]}
-$('#modes').onclick=e=>{const b=e.target.closest('.chip');if(!b||b.disabled)return;pick.mode=b.dataset.m;store.set('mode',pick.mode);renderModes();renderSongs();loadSelected()};
+$('#modes').onclick=e=>{const b=e.target.closest('.chip');if(!b||b.disabled)return;pick.mode=b.dataset.m;store.set('mode',pick.mode);
+ const cur=songs.find(x=>x.id===pick.song);if(cur&&!cur.files[pick.mode]){pick.song=null;store.set('song',null)}renderModes();renderSongs();loadSelected()};
 
 function setReady(r){loaded=r;const go=$('#go');go.disabled=!r;go.textContent=r?'시작':'곡을 고르세요';
  if(r)status(r.label+' · '+r.modeText)}
