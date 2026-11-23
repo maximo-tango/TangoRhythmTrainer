@@ -25,6 +25,7 @@
   "juan-d-arienzo-loca": { "orchestra": "Juan D'Arienzo", "title": "Loca" },
   "juan-d-arienzo-mi-dolor": { "title": "Mi Dolor", "orchestra": "Juan D'Arienzo", "singer": "", "year": "" },
   "juan-d-arienzo-nada-mas": { "orchestra": "Juan D'Arienzo", "title": "Nada Más" },
+  "juan-d-arienzo-valsecito-criollo": { "orchestra": "Juan D'Arienzo", "title": "Valsecito Criollo", "singer": "", "year": "", "hell": true },
   "la-bruja": { "orchestra": "Juan D'Arienzo", "title": "La Bruja" },
   "lucio-demare-c-raul-beron-una-emocion": { "orchestra": "Lucio Demare", "title": "Una Emoción", "singer": "Raúl Berón", "year": "1943" },
   "malerba-ricardo-esta-noche-de-luna": { "orchestra": "José García y sus Zorros Grises", "title": "Esta Noche de Luna", "singer": "Alfredo Rojas", "year": "" },
@@ -43,5 +44,6 @@
   "pedro-laurenz-no-me-extrana": { "title": "No Me Extraña", "orchestra": "Pedro Laurenz", "singer": "", "year": "", "variacion": [["2:24", "2:47"]] },
   "raza-criolla-el-taita": { "orchestra": "", "title": "Raza Criolla (El Taita)" },
   "ricardo-tanturi-cuatro-compases": { "orchestra": "Ricardo Tanturi", "title": "Cuatro Compases", "singer": "Alberto Castillo", "year": "1942" },
+  "ricardo-tanturi-asi-se-baila-el-tango": { "orchestra": "Ricardo Tanturi", "title": "Así se Baila el Tango", "singer": "Alberto Castillo", "year": "1942", "hell": true },
   "rodolfo-biagi-teofilo-ibanez-viejo-porton-1938": { "orchestra": "Rodolfo Biagi", "title": "Viejo Portón", "singer": "Teófilo Ibáñez", "year": "1938" }
 }
