@@ -41,7 +41,7 @@
 
 결과 (songs 폴더를 그대로 GitHub 저장소에 올린다)
   songs/index.json               곡 목록 (게임이 읽는다). 곡마다 모드별 난이도 level 도 적는다
-                                 (1분당 판정 수 ÷ 100, 0.7~2.0. 공홈 게임·순위와 같은 식)
+                                 (1분당 판정 수 ÷ 100, 0.7~5.0. 공홈 게임·순위와 같은 식)
   songs/<곡id>/audio.mp3         음원 (원본 그대로 복사)
   songs/<곡id>/beat.json         박자 easy 채보
   songs/<곡id>/beat_hard.json    박자 hard 채보 (8분·16분)
@@ -115,7 +115,7 @@ REFINE_FWD_MS = 10              # ~ 뒤 이만큼 안에서 소리가 가장 가
 REFINE_MIN_GAP_MS = 40          # 어택 정밀 보정: 옮긴 뒤 앞 노트와 이보다 가까워지면 옮기지 않는다
 REFINE_MIN_RISE = 0.03          # 어택 정밀 보정: 커지는 빠르기가 곡의 센 어택(99백분위)의 이 비율보다 작으면 (소리가 거의 없는 자리) 옮기지 않는다
 BEAT_SNAP_MS = 70               # 마르카토 박 격자를 이 안의 실제 어택으로 다시 맞춘다 (루바토·박 추적의 늦음 바로잡기)
-LEVEL_MAX = 2.0                 # 난이도 상한 (공홈 rhythm-engine chartLevel·DB _rhythm_level 과 같게)
+LEVEL_MAX = 5.0                 # 난이도 상한 (공홈 rhythm-engine chartLevel·DB _rhythm_level 과 같게). 실제 채보는 넘지 않고(Hell 최고 4.06), 조작한 기록만 막는다
 LEVEL_TARGET = {"beat_hard": (1.50, 1.60), "musical": (1.60, 1.70)}  # 난이도 목표 (가운데를 노린다)
 FILL_FROM = 0.9                 # bias 가 이보다 크면 소리가 약한 8분·16분 자리도 채운다 (어택만으로 목표에 못 미치는 곡)
 FILL_SPAN = 0.3                 # FILL_FROM 부터 이만큼 올리면 소리 없는 자리까지 다 채운다
