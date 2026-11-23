@@ -331,7 +331,7 @@ $('#file').onchange=async e=>{const f=e.target.files[0];e.target.value='';if(!f)
  if(pick.song)loadSelected()})();
 
 /* ===== 게임 ===== */
-const cv=$('#c'),g=cv.getContext('2d'),LEAD=3000,KEYS=['f','j'],N=2,WIN=135;
+const cv=$('#c'),g=cv.getContext('2d'),LEAD=3000,KEYS=['f','j'],N=2,WIN=135,EARLY_MISS=250;
 const C={bg:'#16110f',lane:'rgba(237,228,211,.045)',edge:'rgba(237,228,211,.09)',note:'#ede4d3',gold:'#d8bc84',muted:'#b8ab97',miss:'#e0857a'};
 const JC={PERFECT:C.gold,GREAT:C.note,GOOD:C.muted,MISS:C.miss};
 const fine=matchMedia('(pointer:fine)').matches;
@@ -375,14 +375,16 @@ function buildNotes(c){const lane=o=>c.cs===2?Math.min(1,Math.floor(o.x*2/512)):
  out.forEach(n=>{if(!n.hold)n.fin=1});return out}
 function hit(r,l,big){st.sc+=r[1];st.n++;st.cnt[r[2]]++;st.combo++;st.max=Math.max(st.max,st.combo);st.j=r[0];st.jt=performance.now();
  fx.push({l,t:performance.now(),c:JC[r[0]],big})}
-function missOne(why){st.n++;st.cnt.M++;st.combo=0;st.j='MISS';st.jd=why||'';st.jt=performance.now()}
+function missOne(why){st.sc-=100;st.n++;st.cnt.M++;st.combo=0;st.j='MISS';st.jd=why||'';st.jt=performance.now()}
 const grade3=d=>d<=45?['PERFECT',100,'P']:d<=90?['GREAT',70,'G']:['GOOD',40,'O'];
 /* 긴 노트에서 발을 뗐을 때 */
 function release(l){down[l]=false;const n=holding[l];if(!n||!st)return;holding[l]=null;if(n.fin)return;n.fin=1;
  const early=n.e-now();if(early<=WIN){hit(grade3(Math.max(0,early)),l,false);st.jd=''}else missOne('일찍 뗌')}
 function judge(l){if(!st||!ctx||paused)return;down[l]=true;flash[l]=1;const t=now();let b=null;
- for(const n of notes){if(n.done||n.l!==l)continue;if(n.t>t+WIN)break;if(Math.abs(n.t-t)<=WIN&&(!b||Math.abs(n.t-t)<Math.abs(b.t-t)))b=n}
- if(!b)return;const dt=t-b.t,d=Math.abs(dt);b.done=1;
+ let ea=null;// 너무 빠름: 노트보다 WIN~EARLY_MISS 일찍 누르면 그 노트는 MISS, 근처에 노트가 없으면 헛디딤 MISS (막 누르기 막기)
+ for(const n of notes){if(n.done||n.l!==l)continue;if(n.t>t+EARLY_MISS)break;const d=Math.abs(n.t-t);
+  if(d<=WIN){if(!b||d<Math.abs(b.t-t))b=n}else if(n.t>t&&!ea)ea=n}
+ if(!b){if(ea){ea.done=1;missOne('너무 빠름');if(ea.hold){ea.fin=1;missOne()}}else missOne('헛디딤');return}const dt=t-b.t,d=Math.abs(dt);b.done=1;
  hit(grade3(d),l,b.acc);st.dts.push(dt);if(d>20){dt>0?st.late++:st.early++}
  st.jd=d>20?(dt>0?'늦음':'빠름'):'';if(b.hold)holding[l]=b}
 function laneAt(x){const{sw,x0}=geom();const i=Math.floor((x-x0)/(sw/N));return i<0?0:i>=N?N-1:i}
@@ -429,7 +431,7 @@ function loop(){const t=now(),{sw,x0,hy}=geom(),lw=sw/N,ppm=H*0.0008*st.sp,pn=pe
  /* 상단 정보 */
  g.textAlign='left';g.textBaseline='alphabetic';const top=$('#pauseBtn').offsetTop+18;
  g.font='12px sans-serif';g.fillStyle=C.muted;g.fillText(clip(playing.label,W-90),16,top);
- g.font='700 20px sans-serif';g.fillStyle=C.note;g.fillText((st.n?(st.sc/st.n).toFixed(1):'100.0')+'%',16,top+26);
+ g.font='700 20px sans-serif';g.fillStyle=C.note;g.fillText((st.n?Math.max(0,st.sc/st.n).toFixed(1):'100.0')+'%',16,top+26);
  /* 콤보·판정 */
  g.textAlign='center';
  if(st.combo>1){g.font='800 40px sans-serif';g.fillStyle=C.note;g.fillText(st.combo,W/2,H*0.36);g.font='600 11px sans-serif';g.fillStyle=C.muted;g.fillText('COMBO',W/2,H*0.36+18)}
@@ -464,7 +466,7 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)pause()});
 /* ===== 결과 ===== */
 function grade(a){return a>=95?'S':a>=90?'A':a>=80?'B':a>=70?'C':'D'}
 function end(){const s=st,r=playing;stopAudio();
- const acc=s.n?s.sc/s.n:0,prev=store.get(r.key,null),isBest=s.n>0&&(prev==null||acc>prev);if(isBest)store.set(r.key,+acc.toFixed(1));
+ const acc=s.n?Math.max(0,s.sc/s.n):0,prev=store.get(r.key,null),isBest=s.n>0&&(prev==null||acc>prev);if(isBest)store.set(r.key,+acc.toFixed(1));
  $('#rTitle').textContent=r.label;$('#rSub').textContent=[r.sub,r.modeText].filter(Boolean).join(' · ');
  $('#rGrade').textContent=grade(acc);$('#rAcc').textContent=acc.toFixed(1);
  $('#rBest').innerHTML=isBest?'<span class="newbest">최고 기록'+(prev!=null?' · 이전 '+prev.toFixed(1)+'%':'')+'</span>':prev!=null?'<p class="prev">최고 기록 '+prev.toFixed(1)+'%</p>':'';
